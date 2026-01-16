@@ -72,6 +72,13 @@
         const { useState } = React;
         const { createRoot } = ReactDOM;
 
+        // Helper function to parse date correctly without timezone issues
+        function parseLocalDate(dateString) {
+            if (!dateString) return null;
+            const [year, month, day] = dateString.split('-');
+            return new Date(year, month - 1, day);
+        }
+
         // Helper function to get client level based on visits
         function getClientLevel(visits) {
             if (visits >= 40) {
@@ -106,6 +113,7 @@
         function App() {
             const [currentPage, setCurrentPage] = useState('dashboard');
             const [selectedClient, setSelectedClient] = useState(null);
+            const [deleteModalClient, setDeleteModalClient] = useState(null);
             
             // Initialize activities from localStorage
             const [activities, setActivities] = useState(() => {
@@ -176,6 +184,38 @@
                 return client;
             };
             
+            const updateClient = (updatedClient) => {
+                setClients(prev => prev.map(c => 
+                    c.id === updatedClient.id ? updatedClient : c
+                ));
+                // Update selectedClient if it's the same client
+                if (selectedClient && selectedClient.id === updatedClient.id) {
+                    setSelectedClient(updatedClient);
+                }
+                return updatedClient;
+            };
+            
+            const deleteClient = (clientId) => {
+                const client = clients.find(c => c.id === clientId);
+                if (client) {
+                    setDeleteModalClient(client);
+                }
+            };
+            
+            const confirmDeleteClient = () => {
+                if (deleteModalClient) {
+                    setClients(prev => prev.filter(c => c.id !== deleteModalClient.id));
+                    // Keep activities for historical records - don't delete them
+                    const deletedClient = deleteModalClient;
+                    setDeleteModalClient(null);
+                    navigate('client-deleted-success', deletedClient);
+                }
+            };
+            
+            const cancelDeleteClient = () => {
+                setDeleteModalClient(null);
+            };
+            
             const addActivity = (activity) => {
                 const newActivity = {
                     ...activity,
@@ -194,20 +234,58 @@
             return (
                 <>
                     {currentPage === 'dashboard' && <Dashboard navigate={navigate} clients={clients} activities={activities} />}
-                    {currentPage === 'client-profile' && <ClientProfile navigate={navigate} client={selectedClient} activities={activities} />}
+                    {currentPage === 'client-profile' && <ClientProfile navigate={navigate} client={selectedClient} activities={activities} updateClient={updateClient} />}
                     {currentPage === 'register-client' && <RegisterClient navigate={navigate} addClient={addClient} />}
+                    {currentPage === 'client-added-success' && <ClientAddedSuccess navigate={navigate} client={selectedClient} />}
+                    {currentPage === 'edit-client' && <EditClient navigate={navigate} client={selectedClient} updateClient={updateClient} />}
+                    {currentPage === 'client-updated-success' && <ClientUpdatedSuccess navigate={navigate} client={selectedClient} />}
+                    {currentPage === 'client-deleted-success' && <ClientDeletedSuccess navigate={navigate} client={selectedClient} />}
                     {currentPage === 'record-service' && <RecordService navigate={navigate} client={selectedClient} clients={clients} setClients={setClients} addActivity={addActivity} />}
                     {currentPage === 'prize-redeemed' && <PrizeRedeemed navigate={navigate} client={selectedClient} />}
                     {currentPage === 'client-history' && <ClientHistory navigate={navigate} client={selectedClient} activities={activities} />}
                     {currentPage === 'settings' && <Settings navigate={navigate} />}
-                    {currentPage === 'manage-barbers' && <ManageBarbers navigate={navigate} />}
+                    {currentPage === 'manage-barbers' && <ManageBarbers navigate={navigate} data={selectedClient} />}
+                    {currentPage === 'edit-barber' && <EditBarber navigate={navigate} data={selectedClient} />}
+                    {currentPage === 'business-info' && <BusinessInfo navigate={navigate} data={selectedClient} />}
+                    {currentPage === 'service-prices' && <ServicePrices navigate={navigate} data={selectedClient} />}
+                    {currentPage === 'barber-schedules' && <BarberSchedules navigate={navigate} data={selectedClient} />}
                     {currentPage === 'reward-rules' && <RewardRules navigate={navigate} />}
+                    {currentPage === 'notifications' && <Notifications navigate={navigate} clients={clients} />}
                     {currentPage === 'voucher-history' && <VoucherHistory navigate={navigate} />}
                     {currentPage === 'barber-detail' && <BarberDetail navigate={navigate} barber={selectedClient} />}
                     {currentPage === 'edit-barber-schedule' && <EditBarberSchedule navigate={navigate} barber={selectedClient} />}
-                    {currentPage === 'clients-list' && <ClientsList navigate={navigate} clients={clients} />}
-                    {currentPage === 'analytics' && <Analytics navigate={navigate} />}
-                    {currentPage === 'recent-activity' && <RecentActivity navigate={navigate} />}
+                    {currentPage === 'clients-list' && <ClientsList navigate={navigate} clients={clients} deleteClient={deleteClient} />}
+                    {currentPage === 'analytics' && <Analytics navigate={navigate} clients={clients} activities={activities} />}
+                    {currentPage === 'recent-activity' && <RecentActivity navigate={navigate} activities={activities} />}
+                    
+                    {/* Delete Confirmation Modal */}
+                    {deleteModalClient && (
+                        <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+                            <div class="bg-[#2A2D31] rounded-2xl p-6 max-w-sm w-full border border-white/10 shadow-2xl">
+                                <div class="flex items-center justify-center w-16 h-16 rounded-full bg-red-500/20 border-2 border-red-500/50 mx-auto mb-4">
+                                    <span class="material-symbols-outlined text-red-500 text-3xl">warning</span>
+                                </div>
+                                <h3 class="text-white text-xl font-bold text-center mb-2">Delete Client?</h3>
+                                <p class="text-slate-400 text-center mb-2">Are you sure you want to delete</p>
+                                <p class="text-white text-center font-bold mb-4">{deleteModalClient.name}?</p>
+                                <p class="text-slate-500 text-sm text-center mb-6">This will remove the client from your list. Visit history will be preserved for records.</p>
+                                <div class="flex gap-3">
+                                    <button 
+                                        onClick={cancelDeleteClient}
+                                        class="flex-1 px-4 py-3 bg-[#35383D] border border-white/10 rounded-xl text-white font-bold hover:bg-[#3A3D42] transition-colors"
+                                    >
+                                        Cancel
+                                    </button>
+                                    <button 
+                                        onClick={confirmDeleteClient}
+                                        class="flex-1 px-4 py-3 bg-red-500 rounded-xl text-white font-bold hover:bg-red-600 transition-colors"
+                                    >
+                                        Delete
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
                 </>
             );
         }
@@ -216,6 +294,19 @@
         function Dashboard({ navigate, clients, activities }) {
             // Get recent activities (last 5)
             const recentActivities = activities.slice(0, 5);
+            
+            // Calculate today's visits
+            const today = new Date().toISOString().split('T')[0];
+            const todayActivities = activities.filter(activity => {
+                const activityDate = new Date(activity.timestamp).toISOString().split('T')[0];
+                return activityDate === today;
+            });
+            const todayVisits = todayActivities.length;
+            
+            // Calculate unique clients today (by name)
+            const uniqueClientsToday = new Set(todayActivities.map(activity => activity.clientName));
+            const newClientsToday = uniqueClientsToday.size;
+            
             return (
                 <div class="relative flex h-full min-h-screen w-full flex-col overflow-x-hidden pb-20 bg-[#1C1E21]">
                     {/* Header */}
@@ -241,7 +332,7 @@
                                     <span class="text-xs font-semibold text-green-500 bg-green-500/10 px-2 py-0.5 rounded-full">On Track</span>
                                 </div>
                                 <p class="text-sm font-medium text-slate-400">Today's Visits</p>
-                                <p class="text-3xl font-extrabold text-white mt-1">12</p>
+                                <p class="text-3xl font-extrabold text-white mt-1">{todayVisits}</p>
                             </div>
                             
                             <div class="flex flex-col p-5 bg-[#2A2D31] rounded-xl shadow-sm border border-white/5">
@@ -252,7 +343,7 @@
                                     <span class="text-xs font-semibold text-green-500 bg-green-500/10 px-2 py-0.5 rounded-full">+15%</span>
                                 </div>
                                 <p class="text-sm font-medium text-slate-400">New Clients</p>
-                                <p class="text-3xl font-extrabold text-white mt-1">3</p>
+                                <p class="text-3xl font-extrabold text-white mt-1">{newClientsToday}</p>
                             </div>
                         </div>
                     </div>
@@ -334,7 +425,24 @@
         }
 
         // Client Profile Component  
-        function ClientProfile({ navigate, client, activities }) {
+        function ClientProfile({ navigate, client, activities, updateClient }) {
+            const [isEditingNotes, setIsEditingNotes] = React.useState(false);
+            const [notes, setNotes] = React.useState(client?.notes || '');
+            
+            // Sync notes when client changes
+            React.useEffect(() => {
+                setNotes(client?.notes || '');
+            }, [client?.notes, client?.id]);
+            
+            const handleSaveNotes = () => {
+                const updatedClient = {
+                    ...client,
+                    notes: notes
+                };
+                updateClient(updatedClient);
+                setIsEditingNotes(false);
+            };
+            
             if (!client) {
                 return (
                     <div class="bg-[#1C1E21] text-white font-display antialiased min-h-screen flex items-center justify-center">
@@ -355,7 +463,7 @@
                         </button>
                         <h2 class="text-white text-xl font-bold leading-tight tracking-tight flex-1 text-center">Client Profile</h2>
                         <div class="flex w-12 items-center justify-end">
-                            <button class="flex size-12 cursor-pointer items-center justify-center overflow-hidden rounded-full bg-transparent text-white hover:bg-white/10 transition-colors">
+                            <button onClick={() => navigate('edit-client', client)} class="flex size-12 cursor-pointer items-center justify-center overflow-hidden rounded-full bg-transparent text-white hover:bg-white/10 transition-colors">
                                 <span class="material-symbols-outlined">edit</span>
                             </button>
                         </div>
@@ -394,7 +502,7 @@
                                 <div class="flex items-center gap-2 px-4 py-2 rounded-full bg-white/10 backdrop-blur-sm border border-white/10 mb-2">
                                     <span class="material-symbols-outlined text-sm text-gray-400">cake</span>
                                     <span class="text-sm font-medium text-gray-300">
-                                        {new Date(client.birthDate).toLocaleDateString('en-US', {month: 'long', day: 'numeric', year: 'numeric'})}
+                                        {parseLocalDate(client.birthDate).toLocaleDateString('en-US', {month: 'long', day: 'numeric', year: 'numeric'})}
                                     </span>
                                 </div>
                             )}
@@ -439,27 +547,42 @@
                                     })()}
                                     
                                     {/* Progress Grid */}
-                                    <div class="grid grid-cols-5 gap-3">
-                                        {[...Array(client.visits || 0)].map((_, i) => (
-                                            <div key={i} class="flex flex-col items-center">
-                                                <div class="flex items-center justify-center w-full aspect-square rounded-full bg-[#FA383E] text-white shadow-lg">
-                                                    <span class="material-symbols-outlined text-[18px]">content_cut</span>
+                                    {(() => {
+                                        const totalVisits = client.visits || 0;
+                                        const currentCycleVisits = totalVisits % 10; // Progreso en el ciclo actual
+                                        const completedCycles = Math.floor(totalVisits / 10); // Cuántos ciclos completos
+                                        
+                                        return (
+                                            <>
+                                                <div class="grid grid-cols-5 gap-3">
+                                                    {[...Array(currentCycleVisits)].map((_, i) => (
+                                                        <div key={i} class="flex flex-col items-center">
+                                                            <div class="flex items-center justify-center w-full aspect-square rounded-full bg-[#FA383E] text-white shadow-lg">
+                                                                <span class="material-symbols-outlined text-[18px]">content_cut</span>
+                                                            </div>
+                                                        </div>
+                                                    ))}
+                                                    {[...Array(10 - currentCycleVisits)].map((_, i) => (
+                                                        <div key={i} class="flex flex-col items-center">
+                                                            <div class="flex items-center justify-center w-full aspect-square rounded-full bg-white/5 border-2 border-dashed border-white/20 text-white/30">
+                                                                <span class="material-symbols-outlined text-[18px]">content_cut</span>
+                                                            </div>
+                                                        </div>
+                                                    ))}
                                                 </div>
-                                            </div>
-                                        ))}
-                                        {[...Array(10 - (client.visits || 0))].map((_, i) => (
-                                            <div key={i} class="flex flex-col items-center">
-                                                <div class="flex items-center justify-center w-full aspect-square rounded-full bg-white/5 border-2 border-dashed border-white/20 text-white/30">
-                                                    <span class="material-symbols-outlined text-[18px]">content_cut</span>
+                                                
+                                                <div class="flex items-center justify-between border-t border-white/10 pt-4">
+                                                    <div>
+                                                        <p class="text-gray-300 text-sm font-medium">{currentCycleVisits} of 10 cuts completed</p>
+                                                        {completedCycles > 0 && (
+                                                            <p class="text-slate-500 text-xs mt-1">{completedCycles} reward{completedCycles > 1 ? 's' : ''} earned</p>
+                                                        )}
+                                                    </div>
+                                                    <p class="text-[#FA383E] text-sm font-bold">{10 - currentCycleVisits} to go!</p>
                                                 </div>
-                                            </div>
-                                        ))}
-                                    </div>
-                                    
-                                    <div class="flex items-center justify-between border-t border-white/10 pt-4">
-                                        <p class="text-gray-300 text-sm font-medium">{client.visits || 0} of 10 cuts completed</p>
-                                        <p class="text-[#FA383E] text-sm font-bold">{10 - (client.visits || 0)} to go!</p>
-                                    </div>
+                                            </>
+                                        );
+                                    })()}
                                 </div>
                             </div>
                         </div>
@@ -473,7 +596,7 @@
                             <div class="bg-[#2A2D31] rounded-xl p-4 border border-white/5">
                                 <p class="text-slate-400 text-sm mb-1">Birthday</p>
                                 <p class="text-[#FA383E] text-lg font-bold">
-                                    {client.birthDate ? new Date(client.birthDate).toLocaleDateString('en-US', {month: 'short', day: 'numeric'}) : 'N/A'}
+                                    {client.birthDate ? parseLocalDate(client.birthDate).toLocaleDateString('en-US', {month: 'short', day: 'numeric'}) : 'N/A'}
                                 </p>
                             </div>
                         </div>
@@ -486,6 +609,61 @@
                                     <span class="text-base font-bold tracking-wide">Add New Visit</span>
                                 </div>
                             </button>
+                        </div>
+                        
+                        {/* Client Notes */}
+                        <div class="px-4">
+                            <div class="flex items-center justify-between mb-4">
+                                <h3 class="text-white text-xl font-bold flex items-center gap-2">
+                                    <span class="material-symbols-outlined">notes</span>
+                                    Notes
+                                </h3>
+                                {!isEditingNotes && (
+                                    <button 
+                                        onClick={() => setIsEditingNotes(true)} 
+                                        class="text-[#FA383E] text-sm font-semibold hover:text-[#F35369] flex items-center gap-1"
+                                    >
+                                        <span class="material-symbols-outlined text-sm">edit</span>
+                                        Edit
+                                    </button>
+                                )}
+                            </div>
+                            
+                            {isEditingNotes ? (
+                                <div class="flex flex-col gap-3">
+                                    <textarea 
+                                        class="flex w-full min-h-32 rounded-xl border-none bg-[#2A2D31] p-4 text-base font-normal text-white placeholder:text-gray-500 focus:ring-2 focus:ring-[#FA383E] focus:outline-none transition-all resize-vertical"
+                                        value={notes}
+                                        onChange={(e) => setNotes(e.target.value)}
+                                        placeholder="Add notes about this client (preferences, allergies, special requests, etc.)"
+                                    />
+                                    <div class="flex gap-2">
+                                        <button 
+                                            onClick={handleSaveNotes}
+                                            class="flex-1 px-4 py-3 bg-[#FA383E] rounded-xl text-white font-bold hover:bg-[#F35369] transition-colors"
+                                        >
+                                            Save
+                                        </button>
+                                        <button 
+                                            onClick={() => {
+                                                setNotes(client.notes || '');
+                                                setIsEditingNotes(false);
+                                            }}
+                                            class="flex-1 px-4 py-3 bg-[#2A2D31] border border-white/10 rounded-xl text-white font-bold hover:bg-[#35383D] transition-colors"
+                                        >
+                                            Cancel
+                                        </button>
+                                    </div>
+                                </div>
+                            ) : (
+                                <div class="bg-[#2A2D31] p-4 rounded-2xl border border-white/5 min-h-24">
+                                    {client.notes ? (
+                                        <p class="text-slate-300 text-sm leading-relaxed whitespace-pre-wrap">{client.notes}</p>
+                                    ) : (
+                                        <p class="text-slate-500 text-sm italic">No notes added yet. Click Edit to add notes.</p>
+                                    )}
+                                </div>
+                            )}
                         </div>
                         
                         {/* Service History */}
@@ -650,7 +828,8 @@
                 email: '',
                 birthDate: '',
                 preferredBarber: '',
-                referral: ''
+                referral: '',
+                notes: ''
             });
 
             const handleChange = (e) => {
@@ -672,9 +851,8 @@
                 }
 
                 // Add client
-                addClient(formData);
-                alert('Client registered successfully!');
-                navigate('clients-list');
+                const newClient = addClient(formData);
+                navigate('client-added-success', newClient);
             };
 
             return (
@@ -688,7 +866,7 @@
                     </div>
                     
                     {/* Form Content */}
-                    <div class="flex-1 flex flex-col px-6 pt-8 pb-24 gap-6">
+                    <div class="flex-1 flex flex-col px-6 pt-8 pb-32 gap-6">
                         
                         {/* Full Name */}
                         <div class="flex flex-col gap-2">
@@ -780,6 +958,19 @@
                                 <option value="Other">Other</option>
                             </select>
                         </div>
+                        
+                        {/* Notes */}
+                        <div class="flex flex-col gap-2">
+                            <label class="text-white text-base font-medium leading-normal" for="notes">Notes</label>
+                            <textarea 
+                                class="flex w-full min-h-32 rounded-xl border-none bg-[#2A2D31] p-4 text-base font-normal text-white placeholder:text-gray-500 focus:ring-2 focus:ring-[#FA383E] focus:outline-none transition-all resize-vertical" 
+                                id="notes"
+                                name="notes"
+                                value={formData.notes}
+                                onChange={handleChange}
+                                placeholder="Add notes about this client (preferences, allergies, special requests, etc.)"
+                            />
+                        </div>
                     </div>
                     
                     {/* Submit Button */}
@@ -792,11 +983,383 @@
             );
         }
 
+        // Edit Client Component
+        function EditClient({ navigate, client, updateClient }) {
+            const [formData, setFormData] = React.useState({
+                name: client?.name || '',
+                phone: client?.phone || '',
+                email: client?.email || '',
+                birthDate: client?.birthDate || '',
+                preferredBarber: client?.preferredBarber || '',
+                notes: client?.notes || '',
+            });
+
+            const handleChange = (e) => {
+                setFormData({
+                    ...formData,
+                    [e.target.name]: e.target.value
+                });
+            };
+
+            const handleSubmit = () => {
+                // Validation
+                if (!formData.name.trim()) {
+                    alert('Please enter client name');
+                    return;
+                }
+                if (!formData.phone.trim()) {
+                    alert('Please enter phone number');
+                    return;
+                }
+
+                // Update client
+                const updatedClient = {
+                    ...client,
+                    ...formData
+                };
+                updateClient(updatedClient);
+                navigate('client-updated-success', updatedClient);
+            };
+
+            if (!client) {
+                return (
+                    <div class="bg-[#1C1E21] text-white font-display antialiased min-h-screen flex items-center justify-center">
+                        <div class="text-center">
+                            <p class="text-slate-400 mb-4">No client selected</p>
+                            <button onClick={() => navigate('dashboard')} class="px-6 py-3 bg-[#FA383E] rounded-xl font-bold">Back to Dashboard</button>
+                        </div>
+                    </div>
+                );
+            }
+
+            return (
+                <div class="relative flex h-full min-h-screen w-full flex-col bg-[#1C1E21] overflow-x-hidden font-display">
+                    {/* Header */}
+                    <div class="sticky top-0 z-10 flex items-center justify-between bg-[#1C1E21] p-4 pb-2 border-b border-white/5">
+                        <button onClick={() => navigate('client-profile', client)} class="flex size-10 shrink-0 items-center justify-center rounded-full hover:bg-white/10 transition-colors">
+                            <span class="material-symbols-outlined text-white" style={{fontSize: '24px'}}>arrow_back</span>
+                        </button>
+                        <h2 class="text-white text-xl font-bold leading-tight tracking-tight flex-1 text-center pr-10">Edit Client</h2>
+                    </div>
+                    
+                    {/* Form Content */}
+                    <div class="flex-1 flex flex-col px-6 pt-8 pb-32 gap-6">
+                        
+                        {/* Full Name */}
+                        <div class="flex flex-col gap-2">
+                            <label class="text-white text-base font-medium leading-normal" for="name">Full Name *</label>
+                            <input 
+                                class="flex w-full h-14 rounded-xl border-none bg-[#2A2D31] px-4 text-base font-normal text-white placeholder:text-gray-500 focus:ring-2 focus:ring-[#FA383E] focus:outline-none transition-all" 
+                                id="name"
+                                name="name"
+                                value={formData.name}
+                                onChange={handleChange}
+                                placeholder="e.g., John Doe" 
+                                type="text"
+                            />
+                        </div>
+                        
+                        {/* Phone Number */}
+                        <div class="flex flex-col gap-2">
+                            <label class="text-white text-base font-medium leading-normal" for="phone">Phone Number *</label>
+                            <input 
+                                class="flex w-full h-14 rounded-xl border-none bg-[#2A2D31] px-4 text-base font-normal text-white placeholder:text-gray-500 focus:ring-2 focus:ring-[#FA383E] focus:outline-none transition-all" 
+                                id="phone"
+                                name="phone"
+                                value={formData.phone}
+                                onChange={handleChange}
+                                placeholder="e.g., +1 (555) 123-4567" 
+                                type="tel"
+                            />
+                        </div>
+                        
+                        {/* Email */}
+                        <div class="flex flex-col gap-2">
+                            <label class="text-white text-base font-medium leading-normal" for="email">Email</label>
+                            <input 
+                                class="flex w-full h-14 rounded-xl border-none bg-[#2A2D31] px-4 text-base font-normal text-white placeholder:text-gray-500 focus:ring-2 focus:ring-[#FA383E] focus:outline-none transition-all" 
+                                id="email"
+                                name="email"
+                                value={formData.email}
+                                onChange={handleChange}
+                                placeholder="e.g., john@email.com" 
+                                type="email"
+                            />
+                        </div>
+                        
+                        {/* Birth Date */}
+                        <div class="flex flex-col gap-2">
+                            <label class="text-white text-base font-medium leading-normal" for="birthDate">Birth Date</label>
+                            <input 
+                                class="flex w-full h-14 rounded-xl border-none bg-[#2A2D31] px-4 text-base font-normal text-white placeholder:text-gray-500 focus:ring-2 focus:ring-[#FA383E] focus:outline-none transition-all" 
+                                id="birthDate"
+                                name="birthDate"
+                                value={formData.birthDate}
+                                onChange={handleChange}
+                                type="date"
+                            />
+                        </div>
+                        
+                        {/* Preferred Barber */}
+                        <div class="flex flex-col gap-2">
+                            <label class="text-white text-base font-medium leading-normal" for="preferredBarber">Preferred Barber</label>
+                            <select 
+                                class="w-full h-14 rounded-xl border-none bg-[#2A2D31] px-4 text-base font-normal text-white focus:ring-2 focus:ring-[#FA383E] focus:outline-none transition-all" 
+                                id="preferredBarber"
+                                name="preferredBarber"
+                                value={formData.preferredBarber}
+                                onChange={handleChange}
+                            >
+                                <option value="">No preference</option>
+                                <option value="Juan">Juan</option>
+                                <option value="Nico">Nico</option>
+                                <option value="Pedro">Pedro</option>
+                            </select>
+                        </div>
+                        
+                        {/* Notes */}
+                        <div class="flex flex-col gap-2">
+                            <label class="text-white text-base font-medium leading-normal" for="notes">Notes</label>
+                            <textarea 
+                                class="flex w-full min-h-32 rounded-xl border-none bg-[#2A2D31] p-4 text-base font-normal text-white placeholder:text-gray-500 focus:ring-2 focus:ring-[#FA383E] focus:outline-none transition-all resize-vertical" 
+                                id="notes"
+                                name="notes"
+                                value={formData.notes}
+                                onChange={handleChange}
+                                placeholder="Add notes about this client (preferences, allergies, special requests, etc.)"
+                            />
+                        </div>
+                    </div>
+                    
+                    {/* Submit Button */}
+                    <div class="fixed bottom-0 left-0 right-0 z-20 bg-[#1C1E21] p-6 border-t border-white/5 pb-8">
+                        <button onClick={handleSubmit} class="flex w-full items-center justify-center rounded-xl bg-[#FA383E] h-14 px-4 shadow-lg shadow-[#FA383E]/20 active:scale-[0.98] transition-transform">
+                            <span class="text-white text-base font-bold leading-normal tracking-wide">Save Changes</span>
+                        </button>
+                    </div>
+                </div>
+            );
+        }
+
+        // Client Added Success Component
+        function ClientAddedSuccess({ navigate, client }) {
+            return (
+                <div class="bg-[#1C1E21] text-white font-display antialiased min-h-screen flex flex-col relative overflow-hidden">
+                    {/* Success Background */}
+                    <div class="absolute inset-0 pointer-events-none opacity-30">
+                        <span class="material-symbols-outlined absolute text-green-500 text-xl animate-pulse" style={{top: '15%', left: '10%'}}>check_circle</span>
+                        <span class="material-symbols-outlined absolute text-green-500/60 text-sm" style={{top: '25%', right: '15%'}}>person_add</span>
+                        <span class="material-symbols-outlined absolute text-green-500 text-2xl" style={{bottom: '30%', left: '5%'}}>verified</span>
+                        <span class="material-symbols-outlined absolute text-green-500/50 text-xs" style={{bottom: '40%', right: '10%'}}>star</span>
+                    </div>
+                    
+                    {/* Main Content */}
+                    <div class="flex-1 flex flex-col items-center justify-center w-full max-w-md mx-auto px-6 z-10">
+                        {/* Success Icon */}
+                        <div class="relative w-32 h-32 mb-8">
+                            <div class="absolute inset-0 bg-green-500/30 rounded-full blur-2xl"></div>
+                            <div class="relative w-32 h-32 rounded-full bg-green-500/20 flex items-center justify-center border-4 border-green-500">
+                                <span class="material-symbols-outlined text-green-500 text-6xl">check_circle</span>
+                            </div>
+                        </div>
+                        
+                        {/* Title */}
+                        <h1 class="text-white text-3xl font-bold tracking-tight text-center mb-3">
+                            Client Added Successfully!
+                        </h1>
+                        
+                        {/* Description */}
+                        <p class="text-slate-400 text-center leading-relaxed mb-8">
+                            {client?.name} has been added to your client list.
+                        </p>
+                        
+                        {/* Info Card */}
+                        <div class="w-full bg-[#2A2D31] border border-white/10 rounded-xl p-6 mb-8">
+                            <div class="flex items-center gap-4 mb-4">
+                                <div class="bg-[#FA383E]/20 p-3 rounded-full">
+                                    <span class="material-symbols-outlined text-[#FA383E] text-2xl">person</span>
+                                </div>
+                                <div class="flex-1">
+                                    <p class="text-xs uppercase tracking-widest text-slate-500 font-semibold mb-1">New Client</p>
+                                    <p class="text-white text-xl font-bold">{client?.name}</p>
+                                </div>
+                            </div>
+                            <div class="h-px bg-white/10 mb-4"></div>
+                            <div class="space-y-2 text-sm">
+                                <div class="flex justify-between">
+                                    <span class="text-slate-400">Phone</span>
+                                    <span class="text-white font-medium">{client?.phone}</span>
+                                </div>
+                                {client?.preferredBarber && (
+                                    <div class="flex justify-between">
+                                        <span class="text-slate-400">Preferred Barber</span>
+                                        <span class="text-white font-medium">{client.preferredBarber}</span>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    </div>
+                    
+                    {/* Bottom Buttons */}
+                    <div class="p-6 space-y-3 z-10">
+                        <button onClick={() => navigate('client-profile', client)} class="w-full bg-[#FA383E] text-white h-14 rounded-xl font-bold text-base hover:bg-[#F35369] active:scale-[0.98] transition-all flex items-center justify-center gap-2">
+                            <span>View Client Profile</span>
+                            <span class="material-symbols-outlined">arrow_forward</span>
+                        </button>
+                        <button onClick={() => navigate('dashboard')} class="w-full bg-[#2A2D31] text-white h-14 rounded-xl font-semibold text-base hover:bg-[#35383D] active:scale-[0.98] transition-all">
+                            Back to Dashboard
+                        </button>
+                    </div>
+                </div>
+            );
+        }
+
+        // Client Updated Success Component
+        function ClientUpdatedSuccess({ navigate, client }) {
+            return (
+                <div class="bg-[#1C1E21] text-white font-display antialiased min-h-screen flex flex-col relative overflow-hidden">
+                    {/* Success Background */}
+                    <div class="absolute inset-0 pointer-events-none opacity-30">
+                        <span class="material-symbols-outlined absolute text-blue-500 text-xl animate-pulse" style={{top: '15%', left: '10%'}}>check_circle</span>
+                        <span class="material-symbols-outlined absolute text-blue-500/60 text-sm" style={{top: '25%', right: '15%'}}>edit</span>
+                        <span class="material-symbols-outlined absolute text-blue-500 text-2xl" style={{bottom: '30%', left: '5%'}}>verified</span>
+                        <span class="material-symbols-outlined absolute text-blue-500/50 text-xs" style={{bottom: '40%', right: '10%'}}>star</span>
+                    </div>
+                    
+                    {/* Main Content */}
+                    <div class="flex-1 flex flex-col items-center justify-center w-full max-w-md mx-auto px-6 z-10">
+                        {/* Success Icon */}
+                        <div class="relative w-32 h-32 mb-8">
+                            <div class="absolute inset-0 bg-blue-500/30 rounded-full blur-2xl"></div>
+                            <div class="relative w-32 h-32 rounded-full bg-blue-500/20 flex items-center justify-center border-4 border-blue-500">
+                                <span class="material-symbols-outlined text-blue-500 text-6xl">check_circle</span>
+                            </div>
+                        </div>
+                        
+                        {/* Title */}
+                        <h1 class="text-white text-3xl font-bold tracking-tight text-center mb-3">
+                            Changes Saved!
+                        </h1>
+                        
+                        {/* Description */}
+                        <p class="text-slate-400 text-center leading-relaxed mb-8">
+                            {client?.name}'s information has been updated successfully.
+                        </p>
+                        
+                        {/* Info Card */}
+                        <div class="w-full bg-[#2A2D31] border border-white/10 rounded-xl p-6 mb-8">
+                            <div class="flex items-center gap-4 mb-4">
+                                <div class="bg-blue-500/20 p-3 rounded-full">
+                                    <span class="material-symbols-outlined text-blue-500 text-2xl">person</span>
+                                </div>
+                                <div class="flex-1">
+                                    <p class="text-xs uppercase tracking-widest text-slate-500 font-semibold mb-1">Updated Client</p>
+                                    <p class="text-white text-xl font-bold">{client?.name}</p>
+                                </div>
+                            </div>
+                            <div class="flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-green-500/10 border border-green-500/20">
+                                <span class="material-symbols-outlined text-green-500 text-sm">check</span>
+                                <span class="text-green-500 text-sm font-medium">All changes saved</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    {/* Bottom Buttons */}
+                    <div class="p-6 space-y-3 z-10">
+                        <button onClick={() => navigate('client-profile', client)} class="w-full bg-[#FA383E] text-white h-14 rounded-xl font-bold text-base hover:bg-[#F35369] active:scale-[0.98] transition-all flex items-center justify-center gap-2">
+                            <span>View Client Profile</span>
+                            <span class="material-symbols-outlined">arrow_forward</span>
+                        </button>
+                        <button onClick={() => navigate('dashboard')} class="w-full bg-[#2A2D31] text-white h-14 rounded-xl font-semibold text-base hover:bg-[#35383D] active:scale-[0.98] transition-all">
+                            Back to Dashboard
+                        </button>
+                    </div>
+                </div>
+            );
+        }
+
+        // Client Deleted Success Component
+        function ClientDeletedSuccess({ navigate, client }) {
+            return (
+                <div class="bg-[#1C1E21] text-white font-display antialiased min-h-screen flex flex-col relative overflow-hidden">
+                    {/* Success Background */}
+                    <div class="absolute inset-0 pointer-events-none opacity-30">
+                        <span class="material-symbols-outlined absolute text-red-500 text-xl animate-pulse" style={{top: '15%', left: '10%'}}>check_circle</span>
+                        <span class="material-symbols-outlined absolute text-red-500/60 text-sm" style={{top: '25%', right: '15%'}}>delete</span>
+                        <span class="material-symbols-outlined absolute text-red-500 text-2xl" style={{bottom: '30%', left: '5%'}}>person_remove</span>
+                        <span class="material-symbols-outlined absolute text-red-500/50 text-xs" style={{bottom: '40%', right: '10%'}}>delete_forever</span>
+                    </div>
+                    
+                    {/* Main Content */}
+                    <div class="flex-1 flex flex-col items-center justify-center w-full max-w-md mx-auto px-6 z-10">
+                        {/* Success Icon */}
+                        <div class="relative w-32 h-32 mb-8">
+                            <div class="absolute inset-0 bg-red-500/30 rounded-full blur-2xl"></div>
+                            <div class="relative w-32 h-32 rounded-full bg-red-500/20 flex items-center justify-center border-4 border-red-500">
+                                <span class="material-symbols-outlined text-red-500 text-6xl">delete</span>
+                            </div>
+                        </div>
+                        
+                        {/* Title */}
+                        <h1 class="text-white text-3xl font-bold tracking-tight text-center mb-3">
+                            Client Deleted
+                        </h1>
+                        
+                        {/* Description */}
+                        <p class="text-slate-400 text-center leading-relaxed mb-8">
+                            {client?.name} has been removed from your client list. Visit history has been preserved for records.
+                        </p>
+                        
+                        {/* Info Card */}
+                        <div class="w-full bg-[#2A2D31] border border-white/10 rounded-xl p-6 mb-8">
+                            <div class="flex items-center gap-4 mb-4">
+                                <div class="bg-red-500/20 p-3 rounded-full">
+                                    <span class="material-symbols-outlined text-red-500 text-2xl">person_off</span>
+                                </div>
+                                <div class="flex-1">
+                                    <p class="text-xs uppercase tracking-widest text-slate-500 font-semibold mb-1">Deleted Client</p>
+                                    <p class="text-white text-xl font-bold">{client?.name}</p>
+                                </div>
+                            </div>
+                            <div class="flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-green-500/10 border border-green-500/20">
+                                <span class="material-symbols-outlined text-green-500 text-sm">history</span>
+                                <span class="text-green-500 text-sm font-medium">Visit history preserved</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    {/* Bottom Buttons */}
+                    <div class="p-6 space-y-3 z-10">
+                        <button onClick={() => navigate('clients-list')} class="w-full bg-[#FA383E] text-white h-14 rounded-xl font-bold text-base hover:bg-[#F35369] active:scale-[0.98] transition-all flex items-center justify-center gap-2">
+                            <span>View All Clients</span>
+                            <span class="material-symbols-outlined">arrow_forward</span>
+                        </button>
+                        <button onClick={() => navigate('dashboard')} class="w-full bg-[#2A2D31] text-white h-14 rounded-xl font-semibold text-base hover:bg-[#35383D] active:scale-[0.98] transition-all">
+                            Back to Dashboard
+                        </button>
+                    </div>
+                </div>
+            );
+        }
+
         // Record Service Component
         function RecordService({ navigate, client, clients, setClients, addActivity }) {
+            // Load barbers from localStorage
+            const [barbers, setBarbers] = React.useState([]);
             const [selectedService, setSelectedService] = React.useState('fade');
-            const [selectedBarber, setSelectedBarber] = React.useState('Juan');
+            const [selectedBarber, setSelectedBarber] = React.useState('');
             const [notes, setNotes] = React.useState('');
+            
+            React.useEffect(() => {
+                const storedBarbers = JSON.parse(localStorage.getItem('barberapp_barbers') || '["Juan", "Nico", "Pedro"]');
+                setBarbers(storedBarbers);
+                
+                // Set first barber as default
+                if (storedBarbers.length > 0) {
+                    const firstBarber = typeof storedBarbers[0] === 'string' ? storedBarbers[0] : storedBarbers[0].name;
+                    setSelectedBarber(firstBarber);
+                }
+            }, []);
             
             const services = [
                 {id: 'fade', name: 'Fade', icon: 'content_cut'},
@@ -867,9 +1430,10 @@
                                     value={selectedBarber}
                                     onChange={(e) => setSelectedBarber(e.target.value)}
                                     class="w-full bg-[#2A2D31] border-none rounded-xl h-14 pl-4 pr-12 text-base font-medium text-white focus:outline-none focus:ring-2 focus:ring-[#FA383E] transition-all">
-                                    <option value="Juan">Juan</option>
-                                    <option value="Nico">Nico</option>
-                                    <option value="Pedro">Pedro</option>
+                                    {barbers.map((barber, index) => {
+                                        const barberName = typeof barber === 'string' ? barber : barber.name;
+                                        return <option key={index} value={barberName}>{barberName}</option>;
+                                    })}
                                 </select>
                             </div>
                             
@@ -1037,6 +1601,52 @@
 
         // Settings Component
         function Settings({ navigate }) {
+            const [barbers, setBarbers] = React.useState(() => {
+                const saved = localStorage.getItem('barberapp_barbers');
+                if (saved) {
+                    return JSON.parse(saved);
+                }
+                return ['Juan', 'Nico', 'Pedro'];
+            });
+            
+            const [servicePrices, setServicePrices] = React.useState(() => {
+                const saved = localStorage.getItem('barberapp_service_prices');
+                if (saved) {
+                    return JSON.parse(saved);
+                }
+                return {
+                    'Fade': 30,
+                    'Beard': 20,
+                    'Full Cut': 45,
+                    'Scissors': 35
+                };
+            });
+            
+            const [businessInfo, setBusinessInfo] = React.useState(() => {
+                const saved = localStorage.getItem('barberapp_business_info');
+                if (saved) {
+                    return JSON.parse(saved);
+                }
+                return {
+                    name: 'HOR. Barber',
+                    phone: '+1 (555) 000-0000',
+                    address: '123 Main Street, City',
+                    email: 'contact@horbarber.com'
+                };
+            });
+            
+            React.useEffect(() => {
+                localStorage.setItem('barberapp_barbers', JSON.stringify(barbers));
+            }, [barbers]);
+            
+            React.useEffect(() => {
+                localStorage.setItem('barberapp_service_prices', JSON.stringify(servicePrices));
+            }, [servicePrices]);
+            
+            React.useEffect(() => {
+                localStorage.setItem('barberapp_business_info', JSON.stringify(businessInfo));
+            }, [businessInfo]);
+            
             return (
                 <div class="relative flex h-full min-h-screen w-full flex-col bg-[#1C1E21] pb-20">
                     {/* Header with logo */}
@@ -1051,27 +1661,27 @@
                         {/* Account Section */}
                         <div class="space-y-2">
                             <h3 class="text-slate-400 text-xs font-bold uppercase tracking-wider px-2 mb-3">Account</h3>
-                            <button onClick={() => navigate('manage-barbers')} class="w-full bg-[#2A2D31] rounded-xl p-4 flex items-center justify-between hover:bg-[#35383D] transition-colors border border-white/5">
+                            <button onClick={() => navigate('manage-barbers', { barbers, setBarbers })} class="w-full bg-[#2A2D31] rounded-xl p-4 flex items-center justify-between hover:bg-[#35383D] transition-colors border border-white/5">
                                 <div class="flex items-center gap-3">
                                     <div class="w-10 h-10 rounded-full bg-[#FA383E]/20 flex items-center justify-center">
                                         <span class="material-symbols-outlined text-[#FA383E]">group</span>
                                     </div>
                                     <div class="text-left">
                                         <p class="text-white font-semibold">Manage Barbers</p>
-                                        <p class="text-slate-400 text-sm">Add, edit, or remove barbers</p>
+                                        <p class="text-slate-400 text-sm">{barbers.length} barbers registered</p>
                                     </div>
                                 </div>
                                 <span class="material-symbols-outlined text-slate-500">chevron_right</span>
                             </button>
                             
-                            <button class="w-full bg-[#2A2D31] rounded-xl p-4 flex items-center justify-between hover:bg-[#35383D] transition-colors border border-white/5">
+                            <button onClick={() => navigate('business-info', { businessInfo, setBusinessInfo })} class="w-full bg-[#2A2D31] rounded-xl p-4 flex items-center justify-between hover:bg-[#35383D] transition-colors border border-white/5">
                                 <div class="flex items-center gap-3">
                                     <div class="w-10 h-10 rounded-full bg-[#FA383E]/20 flex items-center justify-center">
-                                        <span class="material-symbols-outlined text-[#FA383E]">account_circle</span>
+                                        <span class="material-symbols-outlined text-[#FA383E]">store</span>
                                     </div>
                                     <div class="text-left">
-                                        <p class="text-white font-semibold">Profile Settings</p>
-                                        <p class="text-slate-400 text-sm">Update your profile information</p>
+                                        <p class="text-white font-semibold">Business Information</p>
+                                        <p class="text-slate-400 text-sm">{businessInfo.name}</p>
                                     </div>
                                 </div>
                                 <span class="material-symbols-outlined text-slate-500">chevron_right</span>
@@ -1094,27 +1704,27 @@
                                 <span class="material-symbols-outlined text-slate-500">chevron_right</span>
                             </button>
                             
-                            <button class="w-full bg-[#2A2D31] rounded-xl p-4 flex items-center justify-between hover:bg-[#35383D] transition-colors border border-white/5">
+                            <button onClick={() => navigate('service-prices', { servicePrices, setServicePrices })} class="w-full bg-[#2A2D31] rounded-xl p-4 flex items-center justify-between hover:bg-[#35383D] transition-colors border border-white/5">
                                 <div class="flex items-center gap-3">
                                     <div class="w-10 h-10 rounded-full bg-[#FA383E]/20 flex items-center justify-center">
-                                        <span class="material-symbols-outlined text-[#FA383E]">schedule</span>
+                                        <span class="material-symbols-outlined text-[#FA383E]">payments</span>
                                     </div>
                                     <div class="text-left">
-                                        <p class="text-white font-semibold">Business Hours</p>
-                                        <p class="text-slate-400 text-sm">Set opening hours</p>
+                                        <p class="text-white font-semibold">Service Prices</p>
+                                        <p class="text-slate-400 text-sm">Set prices for services</p>
                                     </div>
                                 </div>
                                 <span class="material-symbols-outlined text-slate-500">chevron_right</span>
                             </button>
                             
-                            <button onClick={() => navigate('voucher-history')} class="w-full bg-[#2A2D31] rounded-xl p-4 flex items-center justify-between hover:bg-[#35383D] transition-colors border border-white/5">
+                            <button onClick={() => navigate('barber-schedules', { barbers, setBarbers })} class="w-full bg-[#2A2D31] rounded-xl p-4 flex items-center justify-between hover:bg-[#35383D] transition-colors border border-white/5">
                                 <div class="flex items-center gap-3">
                                     <div class="w-10 h-10 rounded-full bg-[#FA383E]/20 flex items-center justify-center">
-                                        <span class="material-symbols-outlined text-[#FA383E]">confirmation_number</span>
+                                        <span class="material-symbols-outlined text-[#FA383E]">schedule</span>
                                     </div>
                                     <div class="text-left">
-                                        <p class="text-white font-semibold">Voucher History</p>
-                                        <p class="text-slate-400 text-sm">View redeemed vouchers</p>
+                                        <p class="text-white font-semibold">Barber Schedules</p>
+                                        <p class="text-slate-400 text-sm">Configure work hours</p>
                                     </div>
                                 </div>
                                 <span class="material-symbols-outlined text-slate-500">chevron_right</span>
@@ -1124,27 +1734,14 @@
                         {/* App Section */}
                         <div class="space-y-2">
                             <h3 class="text-slate-400 text-xs font-bold uppercase tracking-wider px-2 mb-3 mt-6">App</h3>
-                            <button class="w-full bg-[#2A2D31] rounded-xl p-4 flex items-center justify-between hover:bg-[#35383D] transition-colors border border-white/5">
+                            <button onClick={() => navigate('notifications')} class="w-full bg-[#2A2D31] rounded-xl p-4 flex items-center justify-between hover:bg-[#35383D] transition-colors border border-white/5">
                                 <div class="flex items-center gap-3">
                                     <div class="w-10 h-10 rounded-full bg-[#FA383E]/20 flex items-center justify-center">
                                         <span class="material-symbols-outlined text-[#FA383E]">notifications</span>
                                     </div>
                                     <div class="text-left">
                                         <p class="text-white font-semibold">Notifications</p>
-                                        <p class="text-slate-400 text-sm">Manage notification preferences</p>
-                                    </div>
-                                </div>
-                                <span class="material-symbols-outlined text-slate-500">chevron_right</span>
-                            </button>
-                            
-                            <button class="w-full bg-[#2A2D31] rounded-xl p-4 flex items-center justify-between hover:bg-[#35383D] transition-colors border border-white/5">
-                                <div class="flex items-center gap-3">
-                                    <div class="w-10 h-10 rounded-full bg-[#FA383E]/20 flex items-center justify-center">
-                                        <span class="material-symbols-outlined text-[#FA383E]">info</span>
-                                    </div>
-                                    <div class="text-left">
-                                        <p class="text-white font-semibold">About</p>
-                                        <p class="text-slate-400 text-sm">Version 1.0.0</p>
+                                        <p class="text-slate-400 text-sm">Birthdays and reminders</p>
                                     </div>
                                 </div>
                                 <span class="material-symbols-outlined text-slate-500">chevron_right</span>
@@ -1176,7 +1773,190 @@
         }
 
         // Analytics Component
-        function Analytics({ navigate }) {
+        function Analytics({ navigate, clients, activities }) {
+            const [selectedPeriod, setSelectedPeriod] = React.useState('today'); // 'today', 'week', 'month', 'custom'
+            const [customStartDate, setCustomStartDate] = React.useState('');
+            const [customEndDate, setCustomEndDate] = React.useState('');
+            const [showCustomDates, setShowCustomDates] = React.useState(false);
+            
+            // Service prices
+            const servicePrices = {
+                'Fade': 30,
+                'Beard': 20,
+                'Full Cut': 45,
+                'Scissors': 35
+            };
+            
+            // Filter activities by period
+            const getFilteredActivities = () => {
+                const now = new Date();
+                const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+                const startOfWeek = new Date(now);
+                startOfWeek.setDate(now.getDate() - 7);
+                const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+                
+                return activities.filter(activity => {
+                    const activityDate = new Date(activity.timestamp);
+                    if (selectedPeriod === 'today') {
+                        return activityDate >= startOfToday;
+                    } else if (selectedPeriod === 'week') {
+                        return activityDate >= startOfWeek;
+                    } else if (selectedPeriod === 'month') {
+                        return activityDate >= startOfMonth;
+                    } else if (selectedPeriod === 'custom' && customStartDate && customEndDate) {
+                        const start = new Date(customStartDate);
+                        start.setHours(0, 0, 0, 0);
+                        const end = new Date(customEndDate);
+                        end.setHours(23, 59, 59, 999);
+                        return activityDate >= start && activityDate <= end;
+                    }
+                    return true;
+                });
+            };
+            
+            // Get previous period activities for comparison
+            const getPreviousPeriodActivities = () => {
+                const now = new Date();
+                let prevStart, prevEnd;
+                
+                if (selectedPeriod === 'today') {
+                    prevEnd = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+                    prevStart = new Date(prevEnd);
+                    prevStart.setDate(prevStart.getDate() - 1);
+                } else if (selectedPeriod === 'week') {
+                    const startOfWeek = new Date(now);
+                    startOfWeek.setDate(now.getDate() - 7);
+                    prevEnd = startOfWeek;
+                    prevStart = new Date(startOfWeek);
+                    prevStart.setDate(prevStart.getDate() - 7);
+                } else if (selectedPeriod === 'month') {
+                    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+                    prevEnd = startOfMonth;
+                    prevStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+                }
+                
+                return activities.filter(activity => {
+                    const activityDate = new Date(activity.timestamp);
+                    return activityDate >= prevStart && activityDate < prevEnd;
+                });
+            };
+            
+            const filteredActivities = getFilteredActivities();
+            const previousActivities = getPreviousPeriodActivities();
+            
+            // Calculate revenue
+            const revenue = filteredActivities.reduce((sum, activity) => {
+                return sum + (servicePrices[activity.service] || 0);
+            }, 0);
+            
+            const prevRevenue = previousActivities.reduce((sum, activity) => {
+                return sum + (servicePrices[activity.service] || 0);
+            }, 0);
+            
+            const revenueChange = prevRevenue > 0 
+                ? ((revenue - prevRevenue) / prevRevenue * 100).toFixed(0)
+                : (revenue > 0 ? 100 : 0);
+            
+            // Count services
+            const servicesCount = filteredActivities.length;
+            const prevServicesCount = previousActivities.length;
+            const servicesChange = prevServicesCount > 0
+                ? ((servicesCount - prevServicesCount) / prevServicesCount * 100).toFixed(0)
+                : (servicesCount > 0 ? 100 : 0);
+            
+            // New clients in period - clients who had their first ever visit in this period
+            const periodStart = selectedPeriod === 'today' 
+                ? new Date(new Date().setHours(0, 0, 0, 0))
+                : selectedPeriod === 'week'
+                ? new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
+                : new Date(new Date().getFullYear(), new Date().getMonth(), 1);
+            
+            // Find unique client IDs in filtered activities
+            const clientIdsInPeriod = new Set(filteredActivities.map(a => a.clientId));
+            
+            // Count clients whose FIRST activity was in this period
+            const newClientsCount = Array.from(clientIdsInPeriod).filter(clientId => {
+                // Get all activities for this client, sorted by date
+                const clientActivities = activities
+                    .filter(a => a.clientId === clientId)
+                    .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+                
+                if (clientActivities.length === 0) return false;
+                
+                // Check if the first activity was in the selected period
+                const firstActivity = clientActivities[0];
+                return new Date(firstActivity.timestamp) >= periodStart;
+            }).length;
+            
+            // Average ticket
+            const avgTicket = servicesCount > 0 ? (revenue / servicesCount).toFixed(0) : 0;
+            const prevAvgTicket = prevServicesCount > 0 ? (prevRevenue / prevServicesCount).toFixed(0) : 0;
+            const avgTicketChange = prevAvgTicket > 0
+                ? ((avgTicket - prevAvgTicket) / prevAvgTicket * 100).toFixed(0)
+                : (avgTicket > 0 ? 100 : 0);
+            
+            // Top services
+            const serviceCount = {};
+            filteredActivities.forEach(activity => {
+                serviceCount[activity.service] = (serviceCount[activity.service] || 0) + 1;
+            });
+            
+            const topServices = Object.entries(serviceCount)
+                .sort((a, b) => b[1] - a[1])
+                .slice(0, 5);
+            
+            const maxServiceCount = topServices.length > 0 ? topServices[0][1] : 1;
+            
+            // Top barbers
+            const barberStats = {};
+            filteredActivities.forEach(activity => {
+                if (!barberStats[activity.barber]) {
+                    barberStats[activity.barber] = { count: 0, revenue: 0 };
+                }
+                barberStats[activity.barber].count++;
+                barberStats[activity.barber].revenue += (servicePrices[activity.service] || 0);
+            });
+            
+            const topBarbers = Object.entries(barberStats)
+                .map(([name, stats]) => ({ name, ...stats }))
+                .sort((a, b) => b.revenue - a.revenue)
+                .slice(0, 5);
+            
+            const barberColors = {
+                'Juan': '#FA383E',
+                'Nico': '#F35369',
+                'Pedro': '#FBCCD2'
+            };
+            
+            const getPeriodLabel = () => {
+                if (selectedPeriod === 'today') return 'yesterday';
+                if (selectedPeriod === 'week') return 'last week';
+                if (selectedPeriod === 'custom') return 'previous period';
+                return 'last month';
+            };
+            
+            const getPeriodDisplayName = () => {
+                if (selectedPeriod === 'today') return 'Today';
+                if (selectedPeriod === 'week') return 'Last 7 Days';
+                if (selectedPeriod === 'month') return 'This Month';
+                if (selectedPeriod === 'custom' && customStartDate && customEndDate) {
+                    const start = new Date(customStartDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                    const end = new Date(customEndDate).toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+                    return `${start} - ${end}`;
+                }
+                return 'Custom Range';
+            };
+            
+            const handlePeriodChange = (e) => {
+                const value = e.target.value;
+                setSelectedPeriod(value);
+                if (value === 'custom') {
+                    setShowCustomDates(true);
+                } else {
+                    setShowCustomDates(false);
+                }
+            };
+            
             return (
                 <div class="relative flex h-full min-h-screen w-full flex-col bg-[#1C1E21] pb-20">
                     {/* Header with logo */}
@@ -1188,10 +1968,40 @@
                     
                     {/* Period Selector */}
                     <div class="p-4">
-                        <div class="flex gap-2 bg-[#2A2D31] rounded-xl p-1">
-                            <button class="flex-1 py-2 px-4 rounded-lg bg-[#FA383E] text-white font-semibold text-sm transition-all">Today</button>
-                            <button class="flex-1 py-2 px-4 rounded-lg text-slate-400 font-semibold text-sm hover:text-white transition-all">Week</button>
-                            <button class="flex-1 py-2 px-4 rounded-lg text-slate-400 font-semibold text-sm hover:text-white transition-all">Month</button>
+                        <div class="flex flex-col gap-3">
+                            <select 
+                                value={selectedPeriod} 
+                                onChange={handlePeriodChange}
+                                class="w-full h-12 rounded-xl border-none bg-[#2A2D31] px-4 text-base font-semibold text-white focus:ring-2 focus:ring-[#FA383E] focus:outline-none transition-all"
+                            >
+                                <option value="today">Today</option>
+                                <option value="week">Last 7 Days</option>
+                                <option value="month">This Month</option>
+                                <option value="custom">Custom Range</option>
+                            </select>
+                            
+                            {showCustomDates && (
+                                <div class="flex gap-2">
+                                    <div class="flex-1">
+                                        <label class="text-slate-400 text-xs mb-1 block">Start Date</label>
+                                        <input 
+                                            type="date"
+                                            value={customStartDate}
+                                            onChange={(e) => setCustomStartDate(e.target.value)}
+                                            class="w-full h-10 rounded-lg border-none bg-[#35383D] px-3 text-sm text-white focus:ring-2 focus:ring-[#FA383E] focus:outline-none"
+                                        />
+                                    </div>
+                                    <div class="flex-1">
+                                        <label class="text-slate-400 text-xs mb-1 block">End Date</label>
+                                        <input 
+                                            type="date"
+                                            value={customEndDate}
+                                            onChange={(e) => setCustomEndDate(e.target.value)}
+                                            class="w-full h-10 rounded-lg border-none bg-[#35383D] px-3 text-sm text-white focus:ring-2 focus:ring-[#FA383E] focus:outline-none"
+                                        />
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     </div>
                     
@@ -1204,8 +2014,12 @@
                                 </div>
                             </div>
                             <p class="text-slate-400 text-xs mb-1">Revenue</p>
-                            <p class="text-white text-2xl font-bold">$1,250</p>
-                            <p class="text-green-500 text-xs mt-1">↑ 12% vs yesterday</p>
+                            <p class="text-white text-2xl font-bold">${revenue}</p>
+                            {revenueChange != 0 && (
+                                <p class={`text-xs mt-1 ${revenueChange > 0 ? 'text-green-500' : 'text-red-500'}`}>
+                                    {revenueChange > 0 ? '↑' : '↓'} {Math.abs(revenueChange)}% vs {getPeriodLabel()}
+                                </p>
+                            )}
                         </div>
                         
                         <div class="bg-[#2A2D31] rounded-xl p-4 border border-white/5">
@@ -1214,9 +2028,9 @@
                                     <span class="material-symbols-outlined text-[#FA383E] text-sm">content_cut</span>
                                 </div>
                             </div>
-                            <p class="text-slate-400 text-xs mb-1">Services</p>
-                            <p class="text-white text-2xl font-bold">24</p>
-                            <p class="text-green-500 text-xs mt-1">↑ 8% vs yesterday</p>
+                            <p class="text-slate-400 text-xs mb-1">Total Services</p>
+                            <p class="text-white text-2xl font-bold">{servicesCount}</p>
+                            <p class="text-slate-500 text-xs mt-1">Haircuts completed</p>
                         </div>
                         
                         <div class="bg-[#2A2D31] rounded-xl p-4 border border-white/5">
@@ -1226,8 +2040,8 @@
                                 </div>
                             </div>
                             <p class="text-slate-400 text-xs mb-1">New Clients</p>
-                            <p class="text-white text-2xl font-bold">5</p>
-                            <p class="text-green-500 text-xs mt-1">↑ 25% vs yesterday</p>
+                            <p class="text-white text-2xl font-bold">{newClientsCount}</p>
+                            <p class="text-slate-500 text-xs mt-1">This period</p>
                         </div>
                         
                         <div class="bg-[#2A2D31] rounded-xl p-4 border border-white/5">
@@ -1237,84 +2051,78 @@
                                 </div>
                             </div>
                             <p class="text-slate-400 text-xs mb-1">Avg. Ticket</p>
-                            <p class="text-white text-2xl font-bold">$52</p>
-                            <p class="text-red-500 text-xs mt-1">↓ 3% vs yesterday</p>
+                            <p class="text-white text-2xl font-bold">${avgTicket}</p>
+                            {avgTicketChange != 0 && (
+                                <p class={`text-xs mt-1 ${avgTicketChange > 0 ? 'text-green-500' : 'text-red-500'}`}>
+                                    {avgTicketChange > 0 ? '↑' : '↓'} {Math.abs(avgTicketChange)}% vs {getPeriodLabel()}
+                                </p>
+                            )}
                         </div>
                     </div>
                     
                     {/* Top Services */}
                     <div class="px-4 mb-6">
-                        <h3 class="text-white text-lg font-bold mb-3">Top Services</h3>
-                        <div class="space-y-2">
-                            <div class="bg-[#2A2D31] rounded-xl p-4 border border-white/5">
-                                <div class="flex items-center justify-between mb-2">
-                                    <p class="text-white font-semibold">Fade Haircut</p>
-                                    <p class="text-[#FA383E] font-bold">12</p>
-                                </div>
-                                <div class="w-full bg-white/10 rounded-full h-2">
-                                    <div class="bg-[#FA383E] h-2 rounded-full" style={{width: '60%'}}></div>
-                                </div>
+                        <h3 class="text-white text-lg font-bold mb-3">Most Popular Services</h3>
+                        {topServices.length > 0 ? (
+                            <div class="space-y-2">
+                                {topServices.map(([service, count]) => {
+                                    const revenue = count * (servicePrices[service] || 0);
+                                    return (
+                                        <div key={service} class="bg-[#2A2D31] rounded-xl p-4 border border-white/5">
+                                            <div class="flex items-center justify-between mb-3">
+                                                <div>
+                                                    <p class="text-white font-semibold">{service}</p>
+                                                    <p class="text-slate-400 text-xs mt-0.5">${servicePrices[service]} per service</p>
+                                                </div>
+                                                <div class="text-right">
+                                                    <p class="text-[#FA383E] font-bold">{count} times</p>
+                                                    <p class="text-slate-400 text-xs">${revenue} total</p>
+                                                </div>
+                                            </div>
+                                            <div class="w-full bg-white/10 rounded-full h-2">
+                                                <div class="bg-[#FA383E] h-2 rounded-full" style={{width: `${(count / maxServiceCount) * 100}%`}}></div>
+                                            </div>
+                                        </div>
+                                    );
+                                })}
                             </div>
-                            
-                            <div class="bg-[#2A2D31] rounded-xl p-4 border border-white/5">
-                                <div class="flex items-center justify-between mb-2">
-                                    <p class="text-white font-semibold">Beard Trim</p>
-                                    <p class="text-[#FA383E] font-bold">8</p>
-                                </div>
-                                <div class="w-full bg-white/10 rounded-full h-2">
-                                    <div class="bg-[#FA383E] h-2 rounded-full" style={{width: '40%'}}></div>
-                                </div>
+                        ) : (
+                            <div class="bg-[#2A2D31] rounded-xl p-8 border border-white/5 text-center">
+                                <span class="material-symbols-outlined text-slate-600 text-4xl mb-2 block">content_cut</span>
+                                <p class="text-slate-500">No services in this period</p>
                             </div>
-                            
-                            <div class="bg-[#2A2D31] rounded-xl p-4 border border-white/5">
-                                <div class="flex items-center justify-between mb-2">
-                                    <p class="text-white font-semibold">Full Service</p>
-                                    <p class="text-[#FA383E] font-bold">4</p>
-                                </div>
-                                <div class="w-full bg-white/10 rounded-full h-2">
-                                    <div class="bg-[#FA383E] h-2 rounded-full" style={{width: '20%'}}></div>
-                                </div>
-                            </div>
-                        </div>
+                        )}
                     </div>
                     
                     {/* Top Barbers */}
                     <div class="px-4 mb-6">
                         <h3 class="text-white text-lg font-bold mb-3">Top Barbers</h3>
-                        <div class="space-y-2">
-                            <div class="bg-[#2A2D31] rounded-xl p-4 border border-white/5 flex items-center justify-between">
-                                <div class="flex items-center gap-3">
-                                    <div class="w-10 h-10 rounded-full bg-[#FA383E] flex items-center justify-center text-white font-bold">J</div>
-                                    <div>
-                                        <p class="text-white font-semibold">Juan</p>
-                                        <p class="text-slate-400 text-sm">10 services</p>
+                        {topBarbers.length > 0 ? (
+                            <div class="space-y-2">
+                                {topBarbers.map((barber) => (
+                                    <div key={barber.name} class="bg-[#2A2D31] rounded-xl p-4 border border-white/5 flex items-center justify-between">
+                                        <div class="flex items-center gap-3">
+                                            <div 
+                                                class="w-10 h-10 rounded-full flex items-center justify-center text-white font-bold" 
+                                                style={{backgroundColor: barberColors[barber.name] || '#FA383E'}}
+                                            >
+                                                {barber.name.charAt(0)}
+                                            </div>
+                                            <div>
+                                                <p class="text-white font-semibold">{barber.name}</p>
+                                                <p class="text-slate-400 text-sm">{barber.count} services</p>
+                                            </div>
+                                        </div>
+                                        <p class="text-[#FA383E] font-bold">${barber.revenue}</p>
                                     </div>
-                                </div>
-                                <p class="text-[#FA383E] font-bold">$520</p>
+                                ))}
                             </div>
-                            
-                            <div class="bg-[#2A2D31] rounded-xl p-4 border border-white/5 flex items-center justify-between">
-                                <div class="flex items-center gap-3">
-                                    <div class="w-10 h-10 rounded-full bg-[#F35369] flex items-center justify-center text-white font-bold">N</div>
-                                    <div>
-                                        <p class="text-white font-semibold">Nico</p>
-                                        <p class="text-slate-400 text-sm">8 services</p>
-                                    </div>
-                                </div>
-                                <p class="text-[#FA383E] font-bold">$430</p>
+                        ) : (
+                            <div class="bg-[#2A2D31] rounded-xl p-8 border border-white/5 text-center">
+                                <span class="material-symbols-outlined text-slate-600 text-4xl mb-2 block">person</span>
+                                <p class="text-slate-500">No barber data in this period</p>
                             </div>
-                            
-                            <div class="bg-[#2A2D31] rounded-xl p-4 border border-white/5 flex items-center justify-between">
-                                <div class="flex items-center gap-3">
-                                    <div class="w-10 h-10 rounded-full bg-[#FBCCD2] flex items-center justify-center text-[#FA383E] font-bold">P</div>
-                                    <div>
-                                        <p class="text-white font-semibold">Pedro</p>
-                                        <p class="text-slate-400 text-sm">6 services</p>
-                                    </div>
-                                </div>
-                                <p class="text-[#FA383E] font-bold">$300</p>
-                            </div>
-                        </div>
+                        )}
                     </div>
                     <div class="fixed bottom-0 left-0 right-0 z-50 bg-[#1C1E21] border-t border-white/5">
                         <div class="flex items-center justify-around h-16">
@@ -1341,7 +2149,7 @@
         }
 
         // ClientsList Component  
-        function ClientsList({ navigate, clients }) {
+        function ClientsList({ navigate, clients, deleteClient }) {
             const [searchQuery, setSearchQuery] = React.useState('');
             const [filterType, setFilterType] = React.useState('all'); // 'all' or 'recent'
             
@@ -1431,42 +2239,54 @@
                             filteredClients.map((client) => {
                                 const level = getClientLevel(client.visits || 0);
                                 return (
-                                <div key={client.id} onClick={() => navigate('client-profile', client)} class="bg-[#2A2D31] rounded-xl p-4 cursor-pointer hover:bg-[#35383D] transition-colors border border-white/5">
-                                    <div class="flex items-center gap-3">
-                                        <div class="relative shrink-0">
-                                            {client.image ? (
-                                                <div class="h-12 w-12 rounded-full bg-cover bg-center" style={{backgroundImage: `url("${client.image}")`}}></div>
-                                            ) : (
-                                                <div class="h-12 w-12 rounded-full bg-[#2A2D31] border-2 border-[#FA383E] flex items-center justify-center text-[#FA383E] font-bold">
-                                                    {client.name.charAt(0)}
-                                                </div>
-                                            )}
-                                            {level && (
-                                                <div class="absolute -bottom-1 -right-1 rounded-full p-0.5 border-2 border-[#1C1E21]" style={{backgroundColor: level.bgColor}} title={`${level.name} Member`}>
-                                                    <span class="material-symbols-outlined text-white" style={{fontSize: '12px'}}>{level.icon}</span>
-                                                </div>
-                                            )}
-                                        </div>
-                                        <div class="flex-1">
-                                            <p class="text-white font-bold text-lg">{client.name}</p>
-                                            <p class="text-slate-400 text-sm mt-1">{client.phone}</p>
-                                            {client.preferredBarber && (
-                                                <p class="text-[#F35369] text-xs mt-1">Barber: {client.preferredBarber}</p>
-                                            )}
-                                        </div>
-                                    </div>
-                                    <div class="flex items-center gap-4 mt-3 pt-3 border-t border-white/5">
-                                        <div class="flex items-center gap-1 text-slate-400 text-sm">
-                                            <span class="material-symbols-outlined text-sm">content_cut</span>
-                                            <span>{client.visits} visits</span>
-                                        </div>
-                                        {client.lastVisit && (
-                                            <div class="flex items-center gap-1 text-slate-400 text-sm">
-                                                <span class="material-symbols-outlined text-sm">schedule</span>
-                                                <span>Last: {new Date(client.lastVisit).toLocaleDateString()}</span>
+                                <div key={client.id} class="bg-[#2A2D31] rounded-xl p-4 border border-white/5 relative">
+                                    <div onClick={() => navigate('client-profile', client)} class="cursor-pointer hover:bg-[#35383D]/50 transition-colors rounded-lg -m-4 p-4">
+                                        <div class="flex items-center gap-3">
+                                            <div class="relative shrink-0">
+                                                {client.image ? (
+                                                    <div class="h-12 w-12 rounded-full bg-cover bg-center" style={{backgroundImage: `url("${client.image}")`}}></div>
+                                                ) : (
+                                                    <div class="h-12 w-12 rounded-full bg-[#2A2D31] border-2 border-[#FA383E] flex items-center justify-center text-[#FA383E] font-bold">
+                                                        {client.name.charAt(0)}
+                                                    </div>
+                                                )}
+                                                {level && (
+                                                    <div class="absolute -bottom-1 -right-1 rounded-full p-0.5 border-2 border-[#1C1E21]" style={{backgroundColor: level.bgColor}} title={`${level.name} Member`}>
+                                                        <span class="material-symbols-outlined text-white" style={{fontSize: '12px'}}>{level.icon}</span>
+                                                    </div>
+                                                )}
                                             </div>
-                                        )}
+                                            <div class="flex-1">
+                                                <p class="text-white font-bold text-lg">{client.name}</p>
+                                                <p class="text-slate-400 text-sm mt-1">{client.phone}</p>
+                                                {client.preferredBarber && (
+                                                    <p class="text-[#F35369] text-xs mt-1">Barber: {client.preferredBarber}</p>
+                                                )}
+                                            </div>
+                                        </div>
+                                        <div class="flex items-center gap-4 mt-3 pt-3 border-t border-white/5">
+                                            <div class="flex items-center gap-1 text-slate-400 text-sm">
+                                                <span class="material-symbols-outlined text-sm">content_cut</span>
+                                                <span>{client.visits} visits</span>
+                                            </div>
+                                            {client.lastVisit && (
+                                                <div class="flex items-center gap-1 text-slate-400 text-sm">
+                                                    <span class="material-symbols-outlined text-sm">schedule</span>
+                                                    <span>Last: {new Date(client.lastVisit).toLocaleDateString()}</span>
+                                                </div>
+                                            )}
+                                        </div>
                                     </div>
+                                    <button 
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            deleteClient(client.id);
+                                        }}
+                                        class="absolute top-3 right-3 p-2 rounded-lg bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 transition-colors group"
+                                        title="Delete client"
+                                    >
+                                        <span class="material-symbols-outlined text-red-500 text-sm group-hover:scale-110 transition-transform">delete</span>
+                                    </button>
                                 </div>
                                 );
                             })
@@ -1504,12 +2324,593 @@
         }
 
         // Placeholder components for other screens
-        function ManageBarbers({ navigate }) {
-            return <div class="flex h-screen w-full items-center justify-center bg-[#1C1E21] text-white"><button onClick={() => navigate('dashboard')} class="px-4 py-2 bg-[#FA383E] rounded-lg">Back to Dashboard</button></div>;
+        function ManageBarbers({ navigate, data }) {
+            const { barbers = [], setBarbers = () => {} } = data || {};
+            const [barberList, setBarberList] = React.useState(() => {
+                // Convert old string array to object array if needed
+                if (barbers.length > 0 && typeof barbers[0] === 'string') {
+                    return barbers.map(name => ({
+                        name,
+                        phone: '',
+                        email: '',
+                        schedule: { monday: '9:00 AM - 7:00 PM', tuesday: '9:00 AM - 7:00 PM', wednesday: '9:00 AM - 7:00 PM', thursday: '9:00 AM - 7:00 PM', friday: '9:00 AM - 7:00 PM', saturday: '9:00 AM - 5:00 PM', sunday: 'Closed' }
+                    }));
+                }
+                return barbers;
+            });
+            const [newBarberName, setNewBarberName] = React.useState('');
+            const [newBarberPhone, setNewBarberPhone] = React.useState('');
+            const [newBarberEmail, setNewBarberEmail] = React.useState('');
+            const [showAddForm, setShowAddForm] = React.useState(false);
+            
+            const handleAddBarber = () => {
+                if (newBarberName.trim()) {
+                    const newBarber = {
+                        name: newBarberName.trim(),
+                        phone: newBarberPhone.trim(),
+                        email: newBarberEmail.trim(),
+                        schedule: { 
+                            monday: '9:00 AM - 7:00 PM', 
+                            tuesday: '9:00 AM - 7:00 PM', 
+                            wednesday: '9:00 AM - 7:00 PM', 
+                            thursday: '9:00 AM - 7:00 PM', 
+                            friday: '9:00 AM - 7:00 PM', 
+                            saturday: '9:00 AM - 5:00 PM', 
+                            sunday: 'Closed' 
+                        }
+                    };
+                    const updated = [...barberList, newBarber];
+                    setBarberList(updated);
+                    setBarbers(updated);
+                    setNewBarberName('');
+                    setNewBarberPhone('');
+                    setNewBarberEmail('');
+                    setShowAddForm(false);
+                }
+            };
+            
+            const handleDeleteBarber = (barberName) => {
+                if (barberList.length <= 1) {
+                    alert('You must have at least one barber');
+                    return;
+                }
+                if (confirm(`Remove ${barberName} from the team?`)) {
+                    const updated = barberList.filter(b => b.name !== barberName);
+                    setBarberList(updated);
+                    setBarbers(updated);
+                }
+            };
+            
+            return (
+                <div class="relative flex h-full min-h-screen w-full flex-col bg-[#1C1E21]">
+                    <div class="flex items-center gap-3 p-4 justify-between border-b border-white/5">
+                        <button onClick={() => navigate('settings')} class="text-white flex items-center justify-center rounded-full hover:bg-white/10 transition-colors p-2">
+                            <span class="material-symbols-outlined">arrow_back</span>
+                        </button>
+                        <h2 class="text-white text-lg font-bold flex-1 text-center">Manage Barbers</h2>
+                        <div class="w-10"></div>
+                    </div>
+                    
+                    <div class="flex-1 p-4 pb-24">
+                        <div class="space-y-3">
+                            {barberList.map((barber, index) => (
+                                <div key={index} class="bg-[#2A2D31] rounded-xl p-4 border border-white/5">
+                                    <div class="flex items-center justify-between mb-3">
+                                        <div class="flex items-center gap-3">
+                                            <div class="w-12 h-12 rounded-full bg-[#FA383E] flex items-center justify-center text-white font-bold text-lg">
+                                                {barber.name.charAt(0)}
+                                            </div>
+                                            <div>
+                                                <p class="text-white font-semibold">{barber.name}</p>
+                                                <p class="text-slate-400 text-sm">Barber</p>
+                                            </div>
+                                        </div>
+                                        <div class="flex gap-2">
+                                            <button 
+                                                onClick={() => navigate('edit-barber', { barber, barberList, setBarbers })}
+                                                class="p-2 rounded-lg bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/30 transition-colors"
+                                            >
+                                                <span class="material-symbols-outlined text-blue-500 text-sm">edit</span>
+                                            </button>
+                                            <button 
+                                                onClick={() => handleDeleteBarber(barber.name)}
+                                                class="p-2 rounded-lg bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 transition-colors"
+                                            >
+                                                <span class="material-symbols-outlined text-red-500 text-sm">delete</span>
+                                            </button>
+                                        </div>
+                                    </div>
+                                    {(barber.phone || barber.email) && (
+                                        <div class="mt-3 pt-3 border-t border-white/5 space-y-1">
+                                            {barber.phone && (
+                                                <div class="flex items-center gap-2 text-sm">
+                                                    <span class="material-symbols-outlined text-slate-500 text-sm">phone</span>
+                                                    <span class="text-slate-300">{barber.phone}</span>
+                                                </div>
+                                            )}
+                                            {barber.email && (
+                                                <div class="flex items-center gap-2 text-sm">
+                                                    <span class="material-symbols-outlined text-slate-500 text-sm">email</span>
+                                                    <span class="text-slate-300">{barber.email}</span>
+                                                </div>
+                                            )}
+                                        </div>
+                                    )}
+                                </div>
+                            ))}
+                        </div>
+                        
+                        {showAddForm && (
+                            <div class="mt-4 bg-[#2A2D31] rounded-xl p-4 border border-white/5 space-y-3">
+                                <input 
+                                    type="text"
+                                    value={newBarberName}
+                                    onChange={(e) => setNewBarberName(e.target.value)}
+                                    placeholder="Barber name *"
+                                    class="w-full h-12 rounded-lg border-none bg-[#35383D] px-4 text-white focus:ring-2 focus:ring-[#FA383E] focus:outline-none"
+                                />
+                                <input 
+                                    type="tel"
+                                    value={newBarberPhone}
+                                    onChange={(e) => setNewBarberPhone(e.target.value)}
+                                    placeholder="Phone"
+                                    class="w-full h-12 rounded-lg border-none bg-[#35383D] px-4 text-white focus:ring-2 focus:ring-[#FA383E] focus:outline-none"
+                                />
+                                <input 
+                                    type="email"
+                                    value={newBarberEmail}
+                                    onChange={(e) => setNewBarberEmail(e.target.value)}
+                                    placeholder="Email"
+                                    class="w-full h-12 rounded-lg border-none bg-[#35383D] px-4 text-white focus:ring-2 focus:ring-[#FA383E] focus:outline-none"
+                                />
+                                <div class="flex gap-2">
+                                    <button 
+                                        onClick={handleAddBarber}
+                                        class="flex-1 h-10 bg-[#FA383E] rounded-lg text-white font-semibold hover:bg-[#F35369]"
+                                    >
+                                        Add
+                                    </button>
+                                    <button 
+                                        onClick={() => {
+                                            setShowAddForm(false);
+                                            setNewBarberName('');
+                                            setNewBarberPhone('');
+                                            setNewBarberEmail('');
+                                        }}
+                                        class="flex-1 h-10 bg-[#35383D] rounded-lg text-white font-semibold hover:bg-[#3A3D42]"
+                                    >
+                                        Cancel
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                    
+                    <div class="fixed bottom-0 left-0 right-0 z-20 bg-[#1C1E21] p-6 border-t border-white/5">
+                        <button 
+                            onClick={() => setShowAddForm(true)}
+                            class="w-full h-14 bg-[#FA383E] rounded-xl text-white font-bold hover:bg-[#F35369] active:scale-[0.98] transition-all flex items-center justify-center gap-2"
+                        >
+                            <span class="material-symbols-outlined">add</span>
+                            <span>Add New Barber</span>
+                        </button>
+                    </div>
+                </div>
+            );
+        }
+        
+        function BusinessInfo({ navigate, data }) {
+            const { businessInfo = {}, setBusinessInfo = () => {} } = data || {};
+            const [formData, setFormData] = React.useState(businessInfo);
+            
+            const handleSave = () => {
+                setBusinessInfo(formData);
+                navigate('settings');
+            };
+            
+            return (
+                <div class="relative flex h-full min-h-screen w-full flex-col bg-[#1C1E21]">
+                    <div class="flex items-center gap-3 p-4 justify-between border-b border-white/5">
+                        <button onClick={() => navigate('settings')} class="text-white flex items-center justify-center rounded-full hover:bg-white/10 transition-colors p-2">
+                            <span class="material-symbols-outlined">arrow_back</span>
+                        </button>
+                        <h2 class="text-white text-lg font-bold flex-1 text-center">Business Info</h2>
+                        <div class="w-10"></div>
+                    </div>
+                    
+                    <div class="flex-1 p-6 pb-24 space-y-4">
+                        <div>
+                            <label class="text-slate-400 text-sm mb-2 block">Business Name</label>
+                            <input 
+                                type="text"
+                                value={formData.name || ''}
+                                onChange={(e) => setFormData({...formData, name: e.target.value})}
+                                class="w-full h-12 rounded-xl border-none bg-[#2A2D31] px-4 text-white focus:ring-2 focus:ring-[#FA383E] focus:outline-none"
+                            />
+                        </div>
+                        
+                        <div>
+                            <label class="text-slate-400 text-sm mb-2 block">Phone</label>
+                            <input 
+                                type="tel"
+                                value={formData.phone || ''}
+                                onChange={(e) => setFormData({...formData, phone: e.target.value})}
+                                class="w-full h-12 rounded-xl border-none bg-[#2A2D31] px-4 text-white focus:ring-2 focus:ring-[#FA383E] focus:outline-none"
+                            />
+                        </div>
+                        
+                        <div>
+                            <label class="text-slate-400 text-sm mb-2 block">Email</label>
+                            <input 
+                                type="email"
+                                value={formData.email || ''}
+                                onChange={(e) => setFormData({...formData, email: e.target.value})}
+                                class="w-full h-12 rounded-xl border-none bg-[#2A2D31] px-4 text-white focus:ring-2 focus:ring-[#FA383E] focus:outline-none"
+                            />
+                        </div>
+                        
+                        <div>
+                            <label class="text-slate-400 text-sm mb-2 block">Address</label>
+                            <textarea 
+                                value={formData.address || ''}
+                                onChange={(e) => setFormData({...formData, address: e.target.value})}
+                                class="w-full h-24 rounded-xl border-none bg-[#2A2D31] px-4 py-3 text-white focus:ring-2 focus:ring-[#FA383E] focus:outline-none resize-none"
+                            />
+                        </div>
+                    </div>
+                    
+                    <div class="fixed bottom-0 left-0 right-0 z-20 bg-[#1C1E21] p-6 border-t border-white/5">
+                        <button 
+                            onClick={handleSave}
+                            class="w-full h-14 bg-[#FA383E] rounded-xl text-white font-bold hover:bg-[#F35369] active:scale-[0.98] transition-all"
+                        >
+                            Save Changes
+                        </button>
+                    </div>
+                </div>
+            );
+        }
+        
+        function ServicePrices({ navigate, data }) {
+            const { servicePrices = {}, setServicePrices = () => {} } = data || {};
+            const [prices, setPrices] = React.useState(servicePrices);
+            
+            const handleSave = () => {
+                setServicePrices(prices);
+                navigate('settings');
+            };
+            
+            return (
+                <div class="relative flex h-full min-h-screen w-full flex-col bg-[#1C1E21]">
+                    <div class="flex items-center gap-3 p-4 justify-between border-b border-white/5">
+                        <button onClick={() => navigate('settings')} class="text-white flex items-center justify-center rounded-full hover:bg-white/10 transition-colors p-2">
+                            <span class="material-symbols-outlined">arrow_back</span>
+                        </button>
+                        <h2 class="text-white text-lg font-bold flex-1 text-center">Service Prices</h2>
+                        <div class="w-10"></div>
+                    </div>
+                    
+                    <div class="flex-1 p-6 pb-24 space-y-4">
+                        {Object.keys(prices).map((service) => (
+                            <div key={service} class="bg-[#2A2D31] rounded-xl p-4 border border-white/5">
+                                <label class="text-white font-semibold mb-3 block">{service}</label>
+                                <div class="flex items-center gap-3">
+                                    <span class="text-slate-400 text-xl">$</span>
+                                    <input 
+                                        type="number"
+                                        value={prices[service]}
+                                        onChange={(e) => setPrices({...prices, [service]: parseFloat(e.target.value) || 0})}
+                                        class="flex-1 h-12 rounded-lg border-none bg-[#35383D] px-4 text-white text-lg font-bold focus:ring-2 focus:ring-[#FA383E] focus:outline-none"
+                                    />
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                    
+                    <div class="fixed bottom-0 left-0 right-0 z-20 bg-[#1C1E21] p-6 border-t border-white/5">
+                        <button 
+                            onClick={handleSave}
+                            class="w-full h-14 bg-[#FA383E] rounded-xl text-white font-bold hover:bg-[#F35369] active:scale-[0.98] transition-all"
+                        >
+                            Save Prices
+                        </button>
+                    </div>
+                </div>
+            );
+        }
+        
+        function EditBarber({ navigate, data }) {
+            const { barber = {}, barberList = [], setBarbers = () => {} } = data || {};
+            const [formData, setFormData] = React.useState(barber);
+            
+            const handleSave = () => {
+                const updated = barberList.map(b => b.name === barber.name ? formData : b);
+                setBarbers(updated);
+                navigate('manage-barbers', { barbers: updated, setBarbers });
+            };
+            
+            return (
+                <div class="relative flex h-full min-h-screen w-full flex-col bg-[#1C1E21]">
+                    <div class="flex items-center gap-3 p-4 justify-between border-b border-white/5">
+                        <button onClick={() => navigate('manage-barbers', { barbers: barberList, setBarbers })} class="text-white flex items-center justify-center rounded-full hover:bg-white/10 transition-colors p-2">
+                            <span class="material-symbols-outlined">arrow_back</span>
+                        </button>
+                        <h2 class="text-white text-lg font-bold flex-1 text-center">Edit Barber</h2>
+                        <div class="w-10"></div>
+                    </div>
+                    
+                    <div class="flex-1 p-6 pb-24 space-y-4">
+                        <div>
+                            <label class="text-slate-400 text-sm mb-2 block">Name</label>
+                            <input 
+                                type="text"
+                                value={formData.name || ''}
+                                onChange={(e) => setFormData({...formData, name: e.target.value})}
+                                class="w-full h-12 rounded-xl border-none bg-[#2A2D31] px-4 text-white focus:ring-2 focus:ring-[#FA383E] focus:outline-none"
+                            />
+                        </div>
+                        
+                        <div>
+                            <label class="text-slate-400 text-sm mb-2 block">Phone</label>
+                            <input 
+                                type="tel"
+                                value={formData.phone || ''}
+                                onChange={(e) => setFormData({...formData, phone: e.target.value})}
+                                class="w-full h-12 rounded-xl border-none bg-[#2A2D31] px-4 text-white focus:ring-2 focus:ring-[#FA383E] focus:outline-none"
+                            />
+                        </div>
+                        
+                        <div>
+                            <label class="text-slate-400 text-sm mb-2 block">Email</label>
+                            <input 
+                                type="email"
+                                value={formData.email || ''}
+                                onChange={(e) => setFormData({...formData, email: e.target.value})}
+                                class="w-full h-12 rounded-xl border-none bg-[#2A2D31] px-4 text-white focus:ring-2 focus:ring-[#FA383E] focus:outline-none"
+                            />
+                        </div>
+                    </div>
+                    
+                    <div class="fixed bottom-0 left-0 right-0 z-20 bg-[#1C1E21] p-6 border-t border-white/5">
+                        <button 
+                            onClick={handleSave}
+                            class="w-full h-14 bg-[#FA383E] rounded-xl text-white font-bold hover:bg-[#F35369] active:scale-[0.98] transition-all"
+                        >
+                            Save Changes
+                        </button>
+                    </div>
+                </div>
+            );
+        }
+        
+        function BarberSchedules({ navigate, data }) {
+            const { barbers = [], setBarbers = () => {} } = data || {};
+            const [barberList, setBarberList] = React.useState(barbers);
+            const [selectedBarber, setSelectedBarber] = React.useState(null);
+            
+            const days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
+            const dayLabels = { monday: 'Monday', tuesday: 'Tuesday', wednesday: 'Wednesday', thursday: 'Thursday', friday: 'Friday', saturday: 'Saturday', sunday: 'Sunday' };
+            
+            const handleScheduleChange = (day, value) => {
+                const updated = { ...selectedBarber, schedule: { ...selectedBarber.schedule, [day]: value } };
+                setSelectedBarber(updated);
+            };
+            
+            const handleSave = () => {
+                const updated = barberList.map(b => b.name === selectedBarber.name ? selectedBarber : b);
+                setBarberList(updated);
+                setBarbers(updated);
+                setSelectedBarber(null);
+            };
+            
+            if (selectedBarber) {
+                return (
+                    <div class="relative flex h-full min-h-screen w-full flex-col bg-[#1C1E21]">
+                        <div class="flex items-center gap-3 p-4 justify-between border-b border-white/5">
+                            <button onClick={() => setSelectedBarber(null)} class="text-white flex items-center justify-center rounded-full hover:bg-white/10 transition-colors p-2">
+                                <span class="material-symbols-outlined">arrow_back</span>
+                            </button>
+                            <h2 class="text-white text-lg font-bold flex-1 text-center">{selectedBarber.name}'s Schedule</h2>
+                            <div class="w-10"></div>
+                        </div>
+                        
+                        <div class="flex-1 p-4 pb-24 space-y-3">
+                            {days.map(day => (
+                                <div key={day} class="bg-[#2A2D31] rounded-xl p-4 border border-white/5">
+                                    <label class="text-white font-semibold mb-2 block">{dayLabels[day]}</label>
+                                    <input 
+                                        type="text"
+                                        value={selectedBarber.schedule?.[day] || ''}
+                                        onChange={(e) => handleScheduleChange(day, e.target.value)}
+                                        placeholder="e.g., 9:00 AM - 7:00 PM or Closed"
+                                        class="w-full h-10 rounded-lg border-none bg-[#35383D] px-4 text-white focus:ring-2 focus:ring-[#FA383E] focus:outline-none"
+                                    />
+                                </div>
+                            ))}
+                        </div>
+                        
+                        <div class="fixed bottom-0 left-0 right-0 z-20 bg-[#1C1E21] p-6 border-t border-white/5">
+                            <button 
+                                onClick={handleSave}
+                                class="w-full h-14 bg-[#FA383E] rounded-xl text-white font-bold hover:bg-[#F35369] active:scale-[0.98] transition-all"
+                            >
+                                Save Schedule
+                            </button>
+                        </div>
+                    </div>
+                );
+            }
+            
+            return (
+                <div class="relative flex h-full min-h-screen w-full flex-col bg-[#1C1E21] pb-20">
+                    <div class="flex items-center gap-3 p-4 justify-between border-b border-white/5">
+                        <button onClick={() => navigate('settings')} class="text-white flex items-center justify-center rounded-full hover:bg-white/10 transition-colors p-2">
+                            <span class="material-symbols-outlined">arrow_back</span>
+                        </button>
+                        <h2 class="text-white text-lg font-bold flex-1 text-center">Barber Schedules</h2>
+                        <div class="w-10"></div>
+                    </div>
+                    
+                    <div class="flex-1 p-4 space-y-3">
+                        {barberList.map((barber, index) => (
+                            <button 
+                                key={index}
+                                onClick={() => setSelectedBarber(barber)}
+                                class="w-full bg-[#2A2D31] rounded-xl p-4 border border-white/5 flex items-center justify-between hover:bg-[#35383D] transition-colors"
+                            >
+                                <div class="flex items-center gap-3">
+                                    <div class="w-12 h-12 rounded-full bg-[#FA383E] flex items-center justify-center text-white font-bold text-lg">
+                                        {barber.name.charAt(0)}
+                                    </div>
+                                    <div class="text-left">
+                                        <p class="text-white font-semibold">{barber.name}</p>
+                                        <p class="text-slate-400 text-sm">Configure schedule</p>
+                                    </div>
+                                </div>
+                                <span class="material-symbols-outlined text-slate-500">chevron_right</span>
+                            </button>
+                        ))}
+                    </div>
+                </div>
+            );
         }
         
         function RewardRules({ navigate }) {
-            return <div class="flex h-screen w-full items-center justify-center bg-[#1C1E21] text-white"><button onClick={() => navigate('dashboard')} class="px-4 py-2 bg-[#FA383E] rounded-lg">Back to Dashboard</button></div>;
+            const [rewardPrice, setRewardPrice] = React.useState(() => {
+                const saved = localStorage.getItem('barberapp_reward_price');
+                return saved ? parseFloat(saved) : 0;
+            });
+            
+            const handleSave = () => {
+                localStorage.setItem('barberapp_reward_price', rewardPrice.toString());
+                navigate('settings');
+            };
+            
+            return (
+                <div class="relative flex h-full min-h-screen w-full flex-col bg-[#1C1E21]">
+                    <div class="flex items-center gap-3 p-4 justify-between border-b border-white/5">
+                        <button onClick={() => navigate('settings')} class="text-white flex items-center justify-center rounded-full hover:bg-white/10 transition-colors p-2">
+                            <span class="material-symbols-outlined">arrow_back</span>
+                        </button>
+                        <h2 class="text-white text-lg font-bold flex-1 text-center">Reward Rules</h2>
+                        <div class="w-10"></div>
+                    </div>
+                    
+                    <div class="flex-1 p-6 pb-24">
+                        <div class="bg-[#2A2D31] rounded-xl p-6 border border-white/5 mb-6">
+                            <div class="flex items-center gap-3 mb-4">
+                                <div class="w-12 h-12 rounded-full bg-[#FA383E]/20 flex items-center justify-center">
+                                    <span class="material-symbols-outlined text-[#FA383E] text-2xl">diamond</span>
+                                </div>
+                                <div>
+                                    <p class="text-white font-bold text-lg">Loyalty Program</p>
+                                    <p class="text-slate-400 text-sm">Every 10 visits = 1 free service</p>
+                                </div>
+                            </div>
+                            <p class="text-slate-300 text-sm leading-relaxed">
+                                When a client completes 10 visits, they automatically receive a free service voucher. Set the maximum value of the free service below.
+                            </p>
+                        </div>
+                        
+                        <div class="bg-[#2A2D31] rounded-xl p-6 border border-white/5">
+                            <label class="text-white font-semibold mb-4 block">Free Service Value</label>
+                            <div class="flex items-center gap-4 mb-2">
+                                <span class="text-slate-400 text-3xl font-bold">$</span>
+                                <input 
+                                    type="number"
+                                    value={rewardPrice}
+                                    onChange={(e) => setRewardPrice(parseFloat(e.target.value) || 0)}
+                                    class="flex-1 h-14 rounded-xl border-none bg-[#35383D] px-4 text-white text-2xl font-bold focus:ring-2 focus:ring-[#FA383E] focus:outline-none"
+                                />
+                            </div>
+                            <p class="text-slate-400 text-xs mt-2">
+                                This is the maximum value for the free service. Clients can choose any service up to this amount.
+                            </p>
+                        </div>
+                    </div>
+                    
+                    <div class="fixed bottom-0 left-0 right-0 z-20 bg-[#1C1E21] p-6 border-t border-white/5">
+                        <button 
+                            onClick={handleSave}
+                            class="w-full h-14 bg-[#FA383E] rounded-xl text-white font-bold hover:bg-[#F35369] active:scale-[0.98] transition-all"
+                        >
+                            Save Reward Rules
+                        </button>
+                    </div>
+                </div>
+            );
+        }
+        
+        function Notifications({ navigate, clients }) {
+            const today = new Date();
+            const todayStr = `${today.getMonth() + 1}/${today.getDate()}`;
+            
+            const upcomingBirthdays = clients.filter(client => {
+                if (!client.birthDate) return false;
+                const bday = new Date(client.birthDate);
+                const bdayStr = `${bday.getMonth() + 1}/${bday.getDate()}`;
+                
+                // Check if birthday is within next 7 days
+                const daysUntil = [];
+                for (let i = 0; i <= 7; i++) {
+                    const checkDate = new Date(today);
+                    checkDate.setDate(today.getDate() + i);
+                    daysUntil.push(`${checkDate.getMonth() + 1}/${checkDate.getDate()}`);
+                }
+                
+                return daysUntil.includes(bdayStr);
+            }).map(client => {
+                const bday = new Date(client.birthDate);
+                const bdayStr = `${bday.getMonth() + 1}/${bday.getDate()}`;
+                const isToday = bdayStr === todayStr;
+                return { ...client, isToday };
+            });
+            
+            return (
+                <div class="relative flex h-full min-h-screen w-full flex-col bg-[#1C1E21] pb-20">
+                    <div class="flex items-center gap-3 p-4 justify-between border-b border-white/5">
+                        <button onClick={() => navigate('settings')} class="text-white flex items-center justify-center rounded-full hover:bg-white/10 transition-colors p-2">
+                            <span class="material-symbols-outlined">arrow_back</span>
+                        </button>
+                        <h2 class="text-white text-lg font-bold flex-1 text-center">Notifications</h2>
+                        <div class="w-10"></div>
+                    </div>
+                    
+                    <div class="flex-1 p-4">
+                        <h3 class="text-white text-lg font-bold mb-4">Upcoming Birthdays</h3>
+                        {upcomingBirthdays.length > 0 ? (
+                            <div class="space-y-3">
+                                {upcomingBirthdays.map(client => (
+                                    <div key={client.id} class="bg-[#2A2D31] rounded-xl p-4 border border-white/5">
+                                        <div class="flex items-center gap-3">
+                                            <div class="w-12 h-12 rounded-full bg-[#FA383E] flex items-center justify-center">
+                                                <span class="material-symbols-outlined text-white text-2xl">cake</span>
+                                            </div>
+                                            <div class="flex-1">
+                                                <p class="text-white font-semibold">{client.name}</p>
+                                                <p class="text-slate-400 text-sm">
+                                                    {client.isToday ? '🎉 Birthday today!' : `Birthday on ${new Date(client.birthDate).toLocaleDateString('en-US', { month: 'long', day: 'numeric' })}`}
+                                                </p>
+                                                {client.phone && <p class="text-slate-500 text-xs mt-1">{client.phone}</p>}
+                                            </div>
+                                            {client.isToday && (
+                                                <div class="px-3 py-1 bg-[#FA383E]/20 border border-[#FA383E]/30 rounded-full">
+                                                    <span class="text-[#FA383E] text-xs font-bold">TODAY</span>
+                                                </div>
+                                            )}
+                                        </div>
+                                    </div>
+                                ))}
+                            </div>
+                        ) : (
+                            <div class="bg-[#2A2D31] rounded-xl p-8 border border-white/5 text-center">
+                                <span class="material-symbols-outlined text-slate-600 text-5xl mb-3 block">cake</span>
+                                <p class="text-slate-400">No upcoming birthdays in the next 7 days</p>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            );
         }
         
         function VoucherHistory({ navigate }) {
@@ -1524,25 +2925,15 @@
             return <div class="flex h-screen w-full items-center justify-center bg-[#1C1E21] text-white"><button onClick={() => navigate('dashboard')} class="px-4 py-2 bg-[#FA383E] rounded-lg">Back to Dashboard</button></div>;
         }
         
-        function RecentActivity({ navigate }) {
+        function RecentActivity({ navigate, activities }) {
             const [barberFilter, setBarberFilter] = React.useState('all');
             const [periodFilter, setPeriodFilter] = React.useState('today');
             const [searchQuery, setSearchQuery] = React.useState('');
             const [customStartDate, setCustomStartDate] = React.useState('');
             const [customEndDate, setCustomEndDate] = React.useState('');
             
-            // Mock activity data
-            const allActivities = [
-                {id: 1, clientName: 'Marcus Thompson', service: 'Fade + Beard', barber: 'Juan', time: '14:30', date: '2026-01-16', price: '$45'},
-                {id: 2, clientName: 'Sarah Chen', service: 'Haircut', barber: 'Nico', time: '13:15', date: '2026-01-16', price: '$35'},
-                {id: 3, clientName: 'David Rodriguez', service: 'Shave', barber: 'Pedro', time: '12:00', date: '2026-01-16', price: '$25'},
-                {id: 4, clientName: 'John Smith', service: 'Fade', barber: 'Juan', time: '16:45', date: '2026-01-15', price: '$40'},
-                {id: 5, clientName: 'Mike Johnson', service: 'Haircut + Beard', barber: 'Nico', time: '15:30', date: '2026-01-15', price: '$50'},
-                {id: 6, clientName: 'Robert Brown', service: 'Haircut', barber: 'Pedro', time: '14:20', date: '2026-01-14', price: '$35'},
-            ];
-            
             const getFilteredActivities = () => {
-                let filtered = [...allActivities];
+                let filtered = [...activities];
                 
                 // Barber filter
                 if (barberFilter !== 'all') {
@@ -1550,20 +2941,25 @@
                 }
                 
                 // Period filter
-                const today = new Date('2026-01-16');
+                const today = new Date();
+                const todayStr = today.toISOString().split('T')[0];
+                
                 if (periodFilter === 'today') {
-                    filtered = filtered.filter(act => act.date === '2026-01-16');
+                    filtered = filtered.filter(act => {
+                        const actDate = new Date(act.timestamp).toISOString().split('T')[0];
+                        return actDate === todayStr;
+                    });
                 } else if (periodFilter === 'week') {
                     const weekAgo = new Date(today);
                     weekAgo.setDate(today.getDate() - 7);
-                    filtered = filtered.filter(act => new Date(act.date) >= weekAgo);
+                    filtered = filtered.filter(act => new Date(act.timestamp) >= weekAgo);
                 } else if (periodFilter === 'month') {
                     const monthAgo = new Date(today);
                     monthAgo.setMonth(today.getMonth() - 1);
-                    filtered = filtered.filter(act => new Date(act.date) >= monthAgo);
+                    filtered = filtered.filter(act => new Date(act.timestamp) >= monthAgo);
                 } else if (periodFilter === 'custom' && customStartDate && customEndDate) {
                     filtered = filtered.filter(act => {
-                        const actDate = new Date(act.date);
+                        const actDate = new Date(act.timestamp);
                         return actDate >= new Date(customStartDate) && actDate <= new Date(customEndDate);
                     });
                 }
@@ -1581,7 +2977,6 @@
             const filteredActivities = getFilteredActivities();
             
             // Calculate stats
-            const totalRevenue = filteredActivities.reduce((sum, act) => sum + parseFloat(act.price.replace('$', '')), 0);
             const totalVisits = filteredActivities.length;
             
             return (
@@ -1602,8 +2997,8 @@
                             <p class="text-white text-2xl font-bold">{totalVisits}</p>
                         </div>
                         <div class="bg-[#2A2D31] rounded-xl p-4 border border-white/5">
-                            <p class="text-slate-400 text-sm mb-1">Revenue</p>
-                            <p class="text-[#FA383E] text-2xl font-bold">${totalRevenue}</p>
+                            <p class="text-slate-400 text-sm mb-1">Unique Clients</p>
+                            <p class="text-[#FA383E] text-2xl font-bold">{new Set(filteredActivities.map(a => a.clientName)).size}</p>
                         </div>
                     </div>
                     
@@ -1686,26 +3081,48 @@
                                 <p class="text-slate-500 text-lg">No activity found</p>
                             </div>
                         ) : (
-                            filteredActivities.map((activity) => (
-                                <div key={activity.id} class="bg-[#2A2D31] rounded-xl p-4 border border-white/5">
-                                    <div class="flex items-center justify-between mb-2">
-                                        <p class="text-white font-bold text-lg">{activity.clientName}</p>
-                                        <span class="text-[#FA383E] font-bold">{activity.price}</span>
+                            filteredActivities.map((activity) => {
+                                const activityDate = new Date(activity.timestamp);
+                                const timeStr = activityDate.toLocaleTimeString('en-US', {hour: '2-digit', minute: '2-digit'});
+                                const dateStr = activityDate.toLocaleDateString('en-US', {month: 'short', day: 'numeric', year: 'numeric'});
+                                const isToday = activityDate.toDateString() === new Date().toDateString();
+                                
+                                return (
+                                    <div key={activity.id} class="bg-[#2A2D31] rounded-xl p-4 border border-white/5">
+                                        <div class="flex items-start justify-between mb-2">
+                                            <div class="flex-1">
+                                                <p class="text-white font-bold text-lg">{activity.clientName}</p>
+                                                {isToday && (
+                                                    <span class="inline-block text-xs font-semibold text-green-500 bg-green-500/10 px-2 py-0.5 rounded-full mt-1">Today</span>
+                                                )}
+                                            </div>
+                                        </div>
+                                        <div class="flex items-center gap-2 mb-2">
+                                            <div class="bg-[#FA383E]/20 p-1.5 rounded">
+                                                <span class="material-symbols-outlined text-[#FA383E] text-sm">content_cut</span>
+                                            </div>
+                                            <span class="text-slate-300 font-medium">{activity.service}</span>
+                                            <span class="text-slate-600">•</span>
+                                            <span class="text-[#F35369] font-medium">{activity.barber}</span>
+                                        </div>
+                                        <div class="flex items-center gap-4 text-slate-500 text-xs">
+                                            <div class="flex items-center gap-1">
+                                                <span class="material-symbols-outlined text-sm">schedule</span>
+                                                <span>{timeStr}</span>
+                                            </div>
+                                            <div class="flex items-center gap-1">
+                                                <span class="material-symbols-outlined text-sm">calendar_today</span>
+                                                <span>{dateStr}</span>
+                                            </div>
+                                        </div>
+                                        {activity.notes && (
+                                            <div class="mt-3 pt-3 border-t border-white/5">
+                                                <p class="text-slate-400 text-sm italic">"{activity.notes}"</p>
+                                            </div>
+                                        )}
                                     </div>
-                                    <div class="flex items-center gap-4 text-sm">
-                                        <span class="text-slate-400">{activity.service}</span>
-                                        <span class="text-slate-500">•</span>
-                                        <span class="text-[#F35369]">{activity.barber}</span>
-                                    </div>
-                                    <div class="flex items-center gap-2 mt-2 text-slate-500 text-xs">
-                                        <span class="material-symbols-outlined text-sm">schedule</span>
-                                        <span>{activity.time}</span>
-                                        <span>•</span>
-                                        <span class="material-symbols-outlined text-sm">calendar_today</span>
-                                        <span>{new Date(activity.date).toLocaleDateString()}</span>
-                                    </div>
-                                </div>
-                            ))
+                                );
+                            })
                         )}
                     </div>
                     
