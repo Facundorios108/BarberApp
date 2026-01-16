@@ -16,6 +16,11 @@
     <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     
+    <!-- Firebase -->
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
+    
     <!-- Tailwind CSS -->
     <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
     <script id="tailwind-config">
@@ -72,6 +77,211 @@
         const { useState } = React;
         const { createRoot } = ReactDOM;
 
+        // ============================================
+        // FIREBASE CONFIGURATION
+        // ============================================
+        const firebaseConfig = {
+            apiKey: "AIzaSyArt0kPwFcdkgYMsHItrhDsOQheEfcUPDg",
+            authDomain: "barberapp-2792d.firebaseapp.com",
+            projectId: "barberapp-2792d",
+            storageBucket: "barberapp-2792d.firebasestorage.app",
+            messagingSenderId: "752240948229",
+            appId: "1:752240948229:web:77faf5021a02742717586c",
+            measurementId: "G-RZZDNG6T94"
+        };
+
+        // Initialize Firebase
+        let db = null;
+        let useFirebase = false;
+
+        try {
+            if (!firebase.apps.length) {
+                firebase.initializeApp(firebaseConfig);
+            }
+            db = firebase.firestore();
+            useFirebase = true;
+            console.log('✅ Firebase initialized successfully');
+        } catch (error) {
+            console.warn('⚠️ Firebase not configured. Using localStorage fallback.', error.message);
+            useFirebase = false;
+        }
+
+        // ============================================
+        // FIREBASE HELPER FUNCTIONS
+        // ============================================
+        const FirebaseService = {
+            // Get collection data
+            async getCollection(collectionName) {
+                // Try localStorage first for faster load
+                const localData = localStorage.getItem(`barberapp_${collectionName}`);
+                const parsedLocal = localData ? JSON.parse(localData) : null;
+                
+                if (!useFirebase) {
+                    return parsedLocal;
+                }
+                try {
+                    const snapshot = await db.collection(collectionName).get();
+                    if (snapshot.empty) return parsedLocal;
+                    const firebaseData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                    // Update localStorage with Firebase data
+                    localStorage.setItem(`barberapp_${collectionName}`, JSON.stringify(firebaseData));
+                    return firebaseData;
+                } catch (error) {
+                    console.warn(`⚠️ Firebase read failed for ${collectionName}, using localStorage:`, error.message);
+                    return parsedLocal;
+                }
+            },
+
+            // Get single document
+            async getDocument(collectionName, docId) {
+                if (!useFirebase) {
+                    const data = localStorage.getItem(`barberapp_${collectionName}`);
+                    if (!data) return null;
+                    const items = JSON.parse(data);
+                    return items.find(item => item.id === docId) || null;
+                }
+                try {
+                    const doc = await db.collection(collectionName).doc(docId).get();
+                    return doc.exists ? { id: doc.id, ...doc.data() } : null;
+                } catch (error) {
+                    console.error(`Error getting document ${docId}:`, error);
+                    return null;
+                }
+            },
+
+            // Save/Update collection (for localStorage compatibility)
+            async saveCollection(collectionName, data) {
+                // Always save to localStorage as backup
+                localStorage.setItem(`barberapp_${collectionName}`, JSON.stringify(data));
+                
+                if (!useFirebase) {
+                    return true;
+                }
+                try {
+                    const batch = db.batch();
+                    const snapshot = await db.collection(collectionName).get();
+                    snapshot.docs.forEach(doc => batch.delete(doc.ref));
+                    
+                    data.forEach(item => {
+                        const docRef = db.collection(collectionName).doc(item.id || db.collection(collectionName).doc().id);
+                        batch.set(docRef, item);
+                    });
+                    
+                    await batch.commit();
+                    console.log(`✅ Saved ${data.length} items to Firebase ${collectionName}`);
+                    return true;
+                } catch (error) {
+                    console.warn(`⚠️ Firebase save failed for ${collectionName}, using localStorage:`, error.message);
+                    return true; // Return true because localStorage succeeded
+                }
+            },
+
+            // Add document
+            async addDocument(collectionName, data) {
+                if (!useFirebase) {
+                    const existing = localStorage.getItem(`barberapp_${collectionName}`);
+                    const items = existing ? JSON.parse(existing) : [];
+                    const newItem = { ...data, id: data.id || Date.now().toString() };
+                    items.push(newItem);
+                    localStorage.setItem(`barberapp_${collectionName}`, JSON.stringify(items));
+                    return newItem;
+                }
+                try {
+                    const docRef = await db.collection(collectionName).add(data);
+                    return { id: docRef.id, ...data };
+                } catch (error) {
+                    console.error(`Error adding document:`, error);
+                    return null;
+                }
+            },
+
+            // Update document
+            async updateDocument(collectionName, docId, data) {
+                if (!useFirebase) {
+                    const existing = localStorage.getItem(`barberapp_${collectionName}`);
+                    if (!existing) return false;
+                    const items = JSON.parse(existing);
+                    const index = items.findIndex(item => item.id === docId);
+                    if (index !== -1) {
+                        items[index] = { ...items[index], ...data };
+                        localStorage.setItem(`barberapp_${collectionName}`, JSON.stringify(items));
+                        return true;
+                    }
+                    return false;
+                }
+                try {
+                    await db.collection(collectionName).doc(docId).update(data);
+                    return true;
+                } catch (error) {
+                    console.error(`Error updating document:`, error);
+                    return false;
+                }
+            },
+
+            // Delete document
+            async deleteDocument(collectionName, docId) {
+                if (!useFirebase) {
+                    const existing = localStorage.getItem(`barberapp_${collectionName}`);
+                    if (!existing) return false;
+                    const items = JSON.parse(existing);
+                    const filtered = items.filter(item => item.id !== docId);
+                    localStorage.setItem(`barberapp_${collectionName}`, JSON.stringify(filtered));
+                    return true;
+                }
+                try {
+                    await db.collection(collectionName).doc(docId).delete();
+                    return true;
+                } catch (error) {
+                    console.error(`Error deleting document:`, error);
+                    return false;
+                }
+            },
+
+            // Get settings document (single doc approach)
+            async getSettings(settingKey) {
+                // Try localStorage first for faster load
+                const localValue = localStorage.getItem(`barberapp_${settingKey}`);
+                
+                if (!useFirebase) {
+                    return localValue;
+                }
+                try {
+                    const doc = await db.collection('settings').doc(settingKey).get();
+                    if (doc.exists) {
+                        const firebaseValue = doc.data().value;
+                        // Update localStorage with Firebase value
+                        localStorage.setItem(`barberapp_${settingKey}`, firebaseValue);
+                        return firebaseValue;
+                    }
+                    return localValue; // Fallback to localStorage
+                } catch (error) {
+                    console.warn(`⚠️ Firebase read failed for ${settingKey}, using localStorage:`, error.message);
+                    return localValue;
+                }
+            },
+
+            // Save settings document
+            async saveSetting(settingKey, value) {
+                // Always save to localStorage as backup
+                localStorage.setItem(`barberapp_${settingKey}`, value);
+                
+                if (!useFirebase) {
+                    return true;
+                }
+                try {
+                    await db.collection('settings').doc(settingKey).set({ value }, { merge: true });
+                    console.log(`✅ Saved ${settingKey} to Firebase`);
+                    return true;
+                } catch (error) {
+                    console.warn(`⚠️ Firebase save failed for ${settingKey}, using localStorage:`, error.message);
+                    return true; // Return true because localStorage succeeded
+                }
+            }
+        };
+
+        // ============================================
+        // HELPER FUNCTIONS
+        // ============================================
         // Helper function to parse date correctly without timezone issues
         function parseLocalDate(dateString) {
             if (!dateString) return null;
@@ -109,69 +319,121 @@
             return null;
         }
 
+        // Notification/Toast Component
+        function Toast({ message, type, onClose }) {
+            const bgColor = type === 'error' ? 'bg-red-500' : type === 'warning' ? 'bg-yellow-500' : 'bg-green-500';
+            const icon = type === 'error' ? 'error' : type === 'warning' ? 'warning' : 'check_circle';
+            
+            return (
+                <div class={`fixed top-4 left-1/2 -translate-x-1/2 z-[100] flex items-center gap-3 px-4 py-3 rounded-xl shadow-2xl ${bgColor} text-white animate-[slideDown_0.3s_ease-out]`}>
+                    <span class="material-symbols-outlined text-white">{icon}</span>
+                    <span class="font-medium">{message}</span>
+                    <button onClick={onClose} class="ml-2 hover:bg-white/20 rounded-full p-1 transition-colors">
+                        <span class="material-symbols-outlined text-sm">close</span>
+                    </button>
+                </div>
+            );
+        }
+
         // Simple Router Implementation
         function App() {
             const [currentPage, setCurrentPage] = useState('dashboard');
             const [selectedClient, setSelectedClient] = useState(null);
+            const [navigationData, setNavigationData] = useState(null);
             const [deleteModalClient, setDeleteModalClient] = useState(null);
+            const [loading, setLoading] = useState(true);
+            const [toast, setToast] = useState({ show: false, message: '', type: 'success' });
             
-            // Initialize activities from localStorage
-            const [activities, setActivities] = useState(() => {
-                const saved = localStorage.getItem('barberapp_activities');
-                if (saved) {
-                    return JSON.parse(saved);
-                }
-                return [];
-            });
+            const [clients, setClients] = useState([]);
+            const [activities, setActivities] = useState([]);
+
+            const showToast = (message, type = 'success') => {
+                setToast({ show: true, message, type });
+                setTimeout(() => setToast(prev => ({ ...prev, show: false })), 3000);
+            };
             
+            // Load data from Firebase/localStorage on mount
             React.useEffect(() => {
-                localStorage.setItem('barberapp_activities', JSON.stringify(activities));
-            }, [activities]);
-            
-            // Initialize clients from localStorage or use default data
-            const [clients, setClients] = useState(() => {
-                const saved = localStorage.getItem('barberapp_clients');
-                if (saved) {
-                    return JSON.parse(saved);
-                }
-                return [
-                    {
-                        id: '1',
-                        name: 'Marcus Thompson',
-                        phone: '+1 555-0123',
-                        email: 'marcus.t@email.com',
-                        birthDate: '1988-03-15',
-                        visits: 45,
-                        lastVisit: '2026-01-10',
-                        preferredBarber: 'Juan',
-                        image: 'https://lh3.googleusercontent.com/aida-public/AB6AXuDB_qYugZ2DiDNEkOuZFpJDWzmxUL5OpZZB9ZBb_E256nupm0rwAyE2PpW96NU-VaCuT4514rygZEKB60rDRdA8aGFDMNA8joUKL_gsnxMHIzwinmSyud18_i-GUkaO1ouIbHlmNlJnFz6UmmCn2M8XwyxwmW98SidPKLr0SPabaNeRz34QIwOTH9yjmEDplD35_rgUpUr6vG1I6ZIQz7m7XxzpamrRFHmQQjVHDCvoJ-rTWJAaw5dNp4O-TPj4Ref0dE0iU4tDgeY9'
-                    },
-                    {
-                        id: '2',
-                        name: 'Sarah Chen',
-                        phone: '+1 555-0124',
-                        email: 'sarah.c@email.com',
-                        birthDate: '1992-07-22',
-                        visits: 28,
-                        lastVisit: '2026-01-08',
-                        preferredBarber: 'Nico'
-                    },
-                    {
-                        id: '3',
-                        name: 'David Rodriguez',
-                        phone: '+1 555-0125',
-                        email: 'david.r@email.com',
-                        birthDate: '1985-11-30',
-                        visits: 12,
-                        lastVisit: '2026-01-05',
-                        preferredBarber: 'Pedro'
+                const loadData = async () => {
+                    setLoading(true);
+                    try {
+                        // Load clients
+                        let clientsData = await FirebaseService.getCollection('clients');
+                        if (!clientsData || clientsData.length === 0) {
+                            // Use default data if no clients exist
+                            clientsData = [
+                                {
+                                    id: '1',
+                                    name: 'Marcus Thompson',
+                                    phone: '+1 555-0123',
+                                    email: 'marcus.t@email.com',
+                                    birthDate: '1988-03-15',
+                                    visits: 45,
+                                    lastVisit: '2026-01-10',
+                                    preferredBarber: 'Juan',
+                                    image: 'https://lh3.googleusercontent.com/aida-public/AB6AXuDB_qYugZ2DiDNEkOuZFpJDWzmxUL5OpZZB9ZBb_E256nupm0rwAyE2PpW96NU-VaCuT4514rygZEKB60rDRdA8aGFDMNA8joUKL_gsnxMHIzwinmSyud18_i-GUkaO1ouIbHlmNlJnFz6UmmCn2M8XwyxwmW98SidPKLr0SPabaNeRz34QIwOTH9yjmEDplD35_rgUpUr6vG1I6ZIQz7m7XxzpamrRFHmQQjVHDCvoJ-rTWJAaw5dNp4O-TPj4Ref0dE0iU4tDgeY9'
+                                },
+                                {
+                                    id: '2',
+                                    name: 'Sarah Chen',
+                                    phone: '+1 555-0124',
+                                    email: 'sarah.c@email.com',
+                                    birthDate: '1992-07-22',
+                                    visits: 28,
+                                    lastVisit: '2026-01-08',
+                                    preferredBarber: 'Nico'
+                                },
+                                {
+                                    id: '3',
+                                    name: 'David Rodriguez',
+                                    phone: '+1 555-0125',
+                                    email: 'david.r@email.com',
+                                    birthDate: '1985-11-30',
+                                    visits: 12,
+                                    lastVisit: '2026-01-05',
+                                    preferredBarber: 'Pedro'
+                                }
+                            ];
+                            await FirebaseService.saveCollection('clients', clientsData);
+                        }
+                        setClients(clientsData);
+                        console.log('✅ Loaded clients:', clientsData.length);
+                        
+                        // Load activities
+                        const activitiesData = await FirebaseService.getCollection('activities');
+                        setActivities(activitiesData || []);
+                        console.log('✅ Loaded activities:', (activitiesData || []).length);
+                    } catch (error) {
+                        console.error('Error loading data:', error);
+                    } finally {
+                        setLoading(false);
                     }
-                ];
-            });
+                };
+                
+                loadData();
+            }, []);
             
+            // Save clients to Firebase/localStorage whenever they change
             React.useEffect(() => {
-                localStorage.setItem('barberapp_clients', JSON.stringify(clients));
-            }, [clients]);
+                if (!loading && clients.length > 0) {
+                    const saveClients = async () => {
+                        await FirebaseService.saveCollection('clients', clients);
+                        console.log('💾 Saved clients:', clients.length);
+                    };
+                    saveClients();
+                }
+            }, [clients, loading]);
+            
+            // Save activities to Firebase/localStorage whenever they change
+            React.useEffect(() => {
+                if (!loading) {
+                    const saveActivities = async () => {
+                        await FirebaseService.saveCollection('activities', activities);
+                        console.log('💾 Saved activities:', activities.length);
+                    };
+                    saveActivities();
+                }
+            }, [activities, loading]);
             
             const addClient = (newClient) => {
                 const client = {
@@ -228,36 +490,61 @@
 
             const navigate = (page, data = null) => {
                 setCurrentPage(page);
-                if (data) setSelectedClient(data);
+                setNavigationData(data);
+                // Only set selectedClient if data looks like a client object
+                if (data && data.id) {
+                    setSelectedClient(data);
+                }
             };
 
             return (
                 <>
-                    {currentPage === 'dashboard' && <Dashboard navigate={navigate} clients={clients} activities={activities} />}
+                    {loading ? (
+                        <div class="flex items-center justify-center min-h-screen bg-[#1C1E21]">
+                            <div class="text-center">
+                                <div class="animate-spin rounded-full h-16 w-16 border-b-2 border-[#FA383E] mx-auto mb-4"></div>
+                                <p class="text-white text-lg font-semibold">Loading BarberApp...</p>
+                                <p class="text-slate-400 text-sm mt-2">
+                                    {useFirebase ? 'Syncing with Firebase' : 'Loading from local storage'}
+                                </p>
+                            </div>
+                        </div>
+                    ) : (
+                        <>
+                            {currentPage === 'dashboard' && <Dashboard navigate={navigate} clients={clients} activities={activities} />}
                     {currentPage === 'client-profile' && <ClientProfile navigate={navigate} client={selectedClient} activities={activities} updateClient={updateClient} />}
-                    {currentPage === 'register-client' && <RegisterClient navigate={navigate} addClient={addClient} />}
+                    {currentPage === 'register-client' && <RegisterClient navigate={navigate} addClient={addClient} showToast={showToast} />}
                     {currentPage === 'client-added-success' && <ClientAddedSuccess navigate={navigate} client={selectedClient} />}
-                    {currentPage === 'edit-client' && <EditClient navigate={navigate} client={selectedClient} updateClient={updateClient} />}
+                    {currentPage === 'edit-client' && <EditClient navigate={navigate} client={selectedClient} updateClient={updateClient} showToast={showToast} />}
                     {currentPage === 'client-updated-success' && <ClientUpdatedSuccess navigate={navigate} client={selectedClient} />}
                     {currentPage === 'client-deleted-success' && <ClientDeletedSuccess navigate={navigate} client={selectedClient} />}
-                    {currentPage === 'record-service' && <RecordService navigate={navigate} client={selectedClient} clients={clients} setClients={setClients} addActivity={addActivity} />}
+                    {currentPage === 'record-service' && <RecordService navigate={navigate} client={selectedClient} clients={clients} setClients={setClients} addActivity={addActivity} showToast={showToast} />}
                     {currentPage === 'prize-redeemed' && <PrizeRedeemed navigate={navigate} client={selectedClient} />}
                     {currentPage === 'client-history' && <ClientHistory navigate={navigate} client={selectedClient} activities={activities} />}
                     {currentPage === 'settings' && <Settings navigate={navigate} />}
-                    {currentPage === 'manage-barbers' && <ManageBarbers navigate={navigate} data={selectedClient} />}
-                    {currentPage === 'edit-barber' && <EditBarber navigate={navigate} data={selectedClient} />}
-                    {currentPage === 'business-info' && <BusinessInfo navigate={navigate} data={selectedClient} />}
-                    {currentPage === 'service-prices' && <ServicePrices navigate={navigate} data={selectedClient} />}
-                    {currentPage === 'barber-schedules' && <BarberSchedules navigate={navigate} data={selectedClient} />}
+                    {currentPage === 'manage-barbers' && <ManageBarbers navigate={navigate} data={navigationData} showToast={showToast} />}
+                    {currentPage === 'edit-barber' && <EditBarber navigate={navigate} data={navigationData} showToast={showToast} />}
+                    {currentPage === 'business-info' && <BusinessInfo navigate={navigate} data={navigationData} showToast={showToast} />}
+                    {currentPage === 'service-prices' && <ServicePrices navigate={navigate} data={navigationData} showToast={showToast} />}
+                    {currentPage === 'barber-schedules' && <BarberSchedules navigate={navigate} data={navigationData} showToast={showToast} />}
                     {currentPage === 'reward-rules' && <RewardRules navigate={navigate} />}
                     {currentPage === 'notifications' && <Notifications navigate={navigate} clients={clients} />}
                     {currentPage === 'voucher-history' && <VoucherHistory navigate={navigate} />}
                     {currentPage === 'barber-detail' && <BarberDetail navigate={navigate} barber={selectedClient} />}
-                    {currentPage === 'edit-barber-schedule' && <EditBarberSchedule navigate={navigate} barber={selectedClient} />}
-                    {currentPage === 'clients-list' && <ClientsList navigate={navigate} clients={clients} deleteClient={deleteClient} />}
+                    {currentPage === 'edit-barber-schedule' && <EditBarberSchedule navigate={navigate} barber={selectedClient} showToast={showToast} />}
+                    {currentPage === 'clients-list' && <ClientsList navigate={navigate} clients={clients} deleteClient={deleteClient} showToast={showToast} />}
                     {currentPage === 'analytics' && <Analytics navigate={navigate} clients={clients} activities={activities} />}
                     {currentPage === 'recent-activity' && <RecentActivity navigate={navigate} activities={activities} />}
                     
+                    {/* Toast Notification */}
+                    {toast.show && (
+                        <Toast 
+                            message={toast.message} 
+                            type={toast.type} 
+                            onClose={() => setToast({ ...toast, show: false })} 
+                        />
+                    )}
+
                     {/* Delete Confirmation Modal */}
                     {deleteModalClient && (
                         <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
@@ -286,6 +573,8 @@
                             </div>
                         </div>
                     )}
+                        </>
+                    )}
                 </>
             );
         }
@@ -312,7 +601,7 @@
                     {/* Header */}
                     <div class="sticky top-0 z-50 flex items-center justify-between px-4 py-4 bg-[#1C1E21]/95 backdrop-blur-md border-b border-white/5">
                         <div class="flex items-center gap-3">
-                            <img src="./Images/hor-barber-logo.png" alt="HOR. Barber" class="h-12 scale-125" />
+                            <img src="./Images/hor-barber-logo.png" alt="HOR. Barber" className="h-12 scale-125" />
                         </div>
                         <button class="relative flex items-center justify-center w-10 h-10 rounded-full bg-[#2A2D31] hover:bg-[#35383D] transition-colors">
                             <span class="material-symbols-outlined text-[#FA383E]" style={{fontSize: '24px'}}>notifications</span>
@@ -821,7 +1110,7 @@
         }
 
         // Register Client Component
-        function RegisterClient({ navigate, addClient }) {
+        function RegisterClient({ navigate, addClient, showToast }) {
             const [formData, setFormData] = React.useState({
                 name: '',
                 phone: '',
@@ -842,11 +1131,11 @@
             const handleSubmit = () => {
                 // Validation
                 if (!formData.name.trim()) {
-                    alert('Please enter client name');
+                    showToast ? showToast('⚠️ Please enter client name', 'warning') : alert('Please enter client name');
                     return;
                 }
                 if (!formData.phone.trim()) {
-                    alert('Please enter phone number');
+                    showToast ? showToast('⚠️ Please enter phone number', 'warning') : alert('Please enter phone number');
                     return;
                 }
 
@@ -984,7 +1273,7 @@
         }
 
         // Edit Client Component
-        function EditClient({ navigate, client, updateClient }) {
+        function EditClient({ navigate, client, updateClient, showToast }) {
             const [formData, setFormData] = React.useState({
                 name: client?.name || '',
                 phone: client?.phone || '',
@@ -1004,11 +1293,11 @@
             const handleSubmit = () => {
                 // Validation
                 if (!formData.name.trim()) {
-                    alert('Please enter client name');
+                    showToast ? showToast('⚠️ Please enter client name', 'warning') : alert('Please enter client name');
                     return;
                 }
                 if (!formData.phone.trim()) {
-                    alert('Please enter phone number');
+                    showToast ? showToast('⚠️ Please enter phone number', 'warning') : alert('Please enter phone number');
                     return;
                 }
 
@@ -1343,7 +1632,7 @@
         }
 
         // Record Service Component
-        function RecordService({ navigate, client, clients, setClients, addActivity }) {
+        function RecordService({ navigate, client, clients, setClients, addActivity, showToast }) {
             // Load barbers from localStorage
             const [barbers, setBarbers] = React.useState([]);
             const [selectedService, setSelectedService] = React.useState('fade');
@@ -1370,7 +1659,7 @@
             
             const handleConfirmVisit = () => {
                 if (!client) {
-                    alert('No client selected');
+                    showToast ? showToast('⚠️ No client selected', 'warning') : alert('No client selected');
                     return;
                 }
                 
@@ -1598,54 +1887,123 @@
                 </div>
             );
         }
-
+        
         // Settings Component
         function Settings({ navigate }) {
-            const [barbers, setBarbers] = React.useState(() => {
-                const saved = localStorage.getItem('barberapp_barbers');
-                if (saved) {
-                    return JSON.parse(saved);
-                }
-                return ['Juan', 'Nico', 'Pedro'];
-            });
+            const [barbers, setBarbers] = React.useState([]);
+            const [servicePrices, setServicePrices] = React.useState({});
+            const [businessInfo, setBusinessInfo] = React.useState({});
+            const [loading, setLoading] = React.useState(true);
             
-            const [servicePrices, setServicePrices] = React.useState(() => {
-                const saved = localStorage.getItem('barberapp_service_prices');
-                if (saved) {
-                    return JSON.parse(saved);
-                }
-                return {
-                    'Fade': 30,
-                    'Beard': 20,
-                    'Full Cut': 45,
-                    'Scissors': 35
+            // Load settings from Firebase/localStorage
+            React.useEffect(() => {
+                const loadSettings = async () => {
+                    setLoading(true);
+                    try {
+                        // Load barbers
+                        let barbersData = await FirebaseService.getSettings('barbers');
+                        if (!barbersData) {
+                            barbersData = JSON.stringify(['Juan', 'Nico', 'Pedro']);
+                            await FirebaseService.saveSetting('barbers', barbersData);
+                        }
+                        setBarbers(JSON.parse(barbersData));
+                        console.log('✅ Loaded barbers:', JSON.parse(barbersData));
+                        
+                        // Load service prices
+                        let pricesData = await FirebaseService.getSettings('service_prices');
+                        if (!pricesData) {
+                            pricesData = JSON.stringify({
+                                'Fade': 30,
+                                'Beard': 20,
+                                'Full Cut': 45,
+                                'Scissors': 35
+                            });
+                            await FirebaseService.saveSetting('service_prices', pricesData);
+                        }
+                        setServicePrices(JSON.parse(pricesData));
+                        console.log('✅ Loaded service prices:', JSON.parse(pricesData));
+                        
+                        // Load business info
+                        let businessData = await FirebaseService.getSettings('business_info');
+                        if (!businessData) {
+                            businessData = JSON.stringify({
+                                name: 'HOR. Barber',
+                                phone: '+1 (555) 000-0000',
+                                address: '123 Main Street, City',
+                                email: 'contact@horbarber.com'
+                            });
+                            await FirebaseService.saveSetting('business_info', businessData);
+                        }
+                        setBusinessInfo(JSON.parse(businessData));
+                        console.log('✅ Loaded business info:', JSON.parse(businessData));
+                    } catch (error) {
+                        console.error('Error loading settings:', error);
+                    } finally {
+                        setLoading(false);
+                    }
                 };
-            });
+                
+                loadSettings();
+            }, []);
             
-            const [businessInfo, setBusinessInfo] = React.useState(() => {
-                const saved = localStorage.getItem('barberapp_business_info');
-                if (saved) {
-                    return JSON.parse(saved);
+            // Save barbers whenever they change
+            React.useEffect(() => {
+                if (!loading) {
+                    console.log('🔍 Barbers changed, will save:', barbers);
+                    if (barbers.length > 0) {
+                        const saveBarbers = async () => {
+                            const success = await FirebaseService.saveSetting('barbers', JSON.stringify(barbers));
+                            console.log('💾 Saved barbers:', barbers, 'Success:', success);
+                        };
+                        saveBarbers();
+                    } else {
+                        console.warn('⚠️ Barbers array is empty, not saving');
+                    }
                 }
-                return {
-                    name: 'HOR. Barber',
-                    phone: '+1 (555) 000-0000',
-                    address: '123 Main Street, City',
-                    email: 'contact@horbarber.com'
-                };
-            });
+            }, [barbers, loading]);
             
+            // Save service prices whenever they change
             React.useEffect(() => {
-                localStorage.setItem('barberapp_barbers', JSON.stringify(barbers));
-            }, [barbers]);
+                if (!loading) {
+                    console.log('🔍 Service prices changed, will save:', servicePrices);
+                    if (Object.keys(servicePrices).length > 0) {
+                        const savePrices = async () => {
+                            const success = await FirebaseService.saveSetting('service_prices', JSON.stringify(servicePrices));
+                            console.log('💾 Saved service prices:', servicePrices, 'Success:', success);
+                        };
+                        savePrices();
+                    } else {
+                        console.warn('⚠️ Service prices object is empty, not saving');
+                    }
+                }
+            }, [servicePrices, loading]);
             
+            // Save business info whenever it changes
             React.useEffect(() => {
-                localStorage.setItem('barberapp_service_prices', JSON.stringify(servicePrices));
-            }, [servicePrices]);
+                if (!loading) {
+                    console.log('🔍 Business info changed, will save:', businessInfo);
+                    if (Object.keys(businessInfo).length > 0) {
+                        const saveInfo = async () => {
+                            const success = await FirebaseService.saveSetting('business_info', JSON.stringify(businessInfo));
+                            console.log('💾 Saved business info:', businessInfo, 'Success:', success);
+                        };
+                        saveInfo();
+                    } else {
+                        console.warn('⚠️ Business info object is empty, not saving');
+                    }
+                }
+            }, [businessInfo, loading]);
             
-            React.useEffect(() => {
-                localStorage.setItem('barberapp_business_info', JSON.stringify(businessInfo));
-            }, [businessInfo]);
+            if (loading) {
+                return (
+                    <div class="flex items-center justify-center min-h-screen bg-[#1C1E21]">
+                        <div class="text-center">
+                            <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-[#FA383E] mx-auto mb-3"></div>
+                            <p class="text-white text-sm">Loading settings...</p>
+                        </div>
+                    </div>
+                );
+            }
             
             return (
                 <div class="relative flex h-full min-h-screen w-full flex-col bg-[#1C1E21] pb-20">
@@ -2324,7 +2682,7 @@
         }
 
         // Placeholder components for other screens
-        function ManageBarbers({ navigate, data }) {
+        function ManageBarbers({ navigate, data, showToast }) {
             const { barbers = [], setBarbers = () => {} } = data || {};
             const [barberList, setBarberList] = React.useState(() => {
                 // Convert old string array to object array if needed
@@ -2342,43 +2700,86 @@
             const [newBarberPhone, setNewBarberPhone] = React.useState('');
             const [newBarberEmail, setNewBarberEmail] = React.useState('');
             const [showAddForm, setShowAddForm] = React.useState(false);
+            const [confirmDelete, setConfirmDelete] = React.useState(null);
             
-            const handleAddBarber = () => {
-                if (newBarberName.trim()) {
-                    const newBarber = {
-                        name: newBarberName.trim(),
-                        phone: newBarberPhone.trim(),
-                        email: newBarberEmail.trim(),
-                        schedule: { 
-                            monday: '9:00 AM - 7:00 PM', 
-                            tuesday: '9:00 AM - 7:00 PM', 
-                            wednesday: '9:00 AM - 7:00 PM', 
-                            thursday: '9:00 AM - 7:00 PM', 
-                            friday: '9:00 AM - 7:00 PM', 
-                            saturday: '9:00 AM - 5:00 PM', 
-                            sunday: 'Closed' 
+            React.useEffect(() => {
+                // Convert and normalize barbers array
+                if (Array.isArray(barbers)) {
+                    const normalized = barbers.map(barber => {
+                        if (typeof barber === 'string') {
+                            return {
+                                name: barber,
+                                phone: '',
+                                email: '',
+                                schedule: { monday: '9:00 AM - 7:00 PM', tuesday: '9:00 AM - 7:00 PM', wednesday: '9:00 AM - 7:00 PM', thursday: '9:00 AM - 7:00 PM', friday: '9:00 AM - 7:00 PM', saturday: '9:00 AM - 5:00 PM', sunday: 'Closed' }
+                            };
                         }
-                    };
-                    const updated = [...barberList, newBarber];
-                    setBarberList(updated);
-                    setBarbers(updated);
-                    setNewBarberName('');
-                    setNewBarberPhone('');
-                    setNewBarberEmail('');
-                    setShowAddForm(false);
+                        return barber;
+                    }).filter(Boolean); // Remove null/undefined values
+                    setBarberList(normalized);
+                } else {
+                    setBarberList([]);
                 }
-            };
+            }, [barbers]);
             
-            const handleDeleteBarber = (barberName) => {
-                if (barberList.length <= 1) {
-                    alert('You must have at least one barber');
+            const handleAddBarber = async () => {
+                if (!newBarberName.trim()) {
+                    showToast ? showToast('⚠️ Please enter a barber name', 'warning') : alert('⚠️ Please enter a barber name');
                     return;
                 }
-                if (confirm(`Remove ${barberName} from the team?`)) {
-                    const updated = barberList.filter(b => b.name !== barberName);
-                    setBarberList(updated);
-                    setBarbers(updated);
+                const newBarber = {
+                    name: newBarberName.trim(),
+                    phone: newBarberPhone.trim(),
+                    email: newBarberEmail.trim(),
+                    schedule: { 
+                        monday: '9:00 AM - 7:00 PM', 
+                        tuesday: '9:00 AM - 7:00 PM', 
+                        wednesday: '9:00 AM - 7:00 PM', 
+                        thursday: '9:00 AM - 7:00 PM', 
+                        friday: '9:00 AM - 7:00 PM', 
+                        saturday: '9:00 AM - 5:00 PM', 
+                        sunday: 'Closed' 
+                    }
+                };
+                const updated = [...barberList, newBarber];
+                setBarberList(updated);
+                // Save directly to storage first (Settings component unmounts on navigation)
+                await FirebaseService.saveSetting('barbers', JSON.stringify(updated));
+                console.log('✅ Directly saved barbers in ManageBarbers');
+                
+                // Update navigation state as fallback
+                setBarbers(updated);
+                
+                setNewBarberName('');
+                setNewBarberPhone('');
+                setNewBarberEmail('');
+                setShowAddForm(false);
+                showToast ? showToast(`✅ ${newBarberName.trim()} added successfully!`) : alert(`✅ ${newBarberName.trim()} added successfully!`);
+            };
+            
+            const promptDeleteBarber = (barberName) => {
+                if (barberList.length <= 1) {
+                    showToast ? showToast('You must have at least one barber', 'warning') : alert('You must have at least one barber');
+                    return;
                 }
+                setConfirmDelete(barberName);
+            };
+
+            const confirmDeleteBarber = async () => {
+                if (!confirmDelete) return;
+
+                const updated = barberList.filter(b => {
+                    const bName = typeof b === 'string' ? b : b.name;
+                    return bName !== confirmDelete;
+                });
+
+                setBarberList(updated);
+                // Save directly to storage
+                await FirebaseService.saveSetting('barbers', JSON.stringify(updated));
+                console.log('✅ Directly saved deleted barber in ManageBarbers');
+                setBarbers(updated);
+                setConfirmDelete(null);
+                showToast ? showToast('✅ Barber removed successfully!') : alert('✅ Barber removed successfully!');
             };
             
             return (
@@ -2393,51 +2794,64 @@
                     
                     <div class="flex-1 p-4 pb-24">
                         <div class="space-y-3">
-                            {barberList.map((barber, index) => (
-                                <div key={index} class="bg-[#2A2D31] rounded-xl p-4 border border-white/5">
-                                    <div class="flex items-center justify-between mb-3">
-                                        <div class="flex items-center gap-3">
-                                            <div class="w-12 h-12 rounded-full bg-[#FA383E] flex items-center justify-center text-white font-bold text-lg">
-                                                {barber.name.charAt(0)}
+                            {barberList.map((barber, index) => {
+                                // Ensure barber is valid
+                                if (!barber) return null;
+                                
+                                const barberName = typeof barber === 'string' ? barber : (barber?.name || 'Unknown');
+                                const barberPhone = typeof barber === 'object' ? barber?.phone : '';
+                                const barberEmail = typeof barber === 'object' ? barber?.email : '';
+                                const barberObj = typeof barber === 'string' ? { name: barber, phone: '', email: '', schedule: {} } : barber;
+                                
+                                // Ensure barberName is a string
+                                const nameStr = String(barberName);
+                                
+                                return (
+                                    <div key={index} class="bg-[#2A2D31] rounded-xl p-4 border border-white/5">
+                                        <div class="flex items-center justify-between mb-3">
+                                            <div class="flex items-center gap-3">
+                                                <div class="w-12 h-12 rounded-full bg-[#FA383E] flex items-center justify-center text-white font-bold text-lg">
+                                                    {nameStr.charAt(0).toUpperCase()}
+                                                </div>
+                                                <div>
+                                                    <p class="text-white font-semibold">{nameStr}</p>
+                                                    <p class="text-slate-400 text-sm">Barber</p>
+                                                </div>
                                             </div>
-                                            <div>
-                                                <p class="text-white font-semibold">{barber.name}</p>
-                                                <p class="text-slate-400 text-sm">Barber</p>
+                                            <div class="flex gap-2">
+                                                <button 
+                                                    onClick={() => navigate('edit-barber', { barber: barberObj, barberList, setBarbers })}
+                                                    class="p-2 rounded-lg bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/30 transition-colors"
+                                                >
+                                                    <span class="material-symbols-outlined text-blue-500 text-sm">edit</span>
+                                                </button>
+                                                <button 
+                                                    onClick={() => promptDeleteBarber(nameStr)}
+                                                    class="p-2 rounded-lg bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 transition-colors"
+                                                >
+                                                    <span class="material-symbols-outlined text-red-500 text-sm">delete</span>
+                                                </button>
                                             </div>
                                         </div>
-                                        <div class="flex gap-2">
-                                            <button 
-                                                onClick={() => navigate('edit-barber', { barber, barberList, setBarbers })}
-                                                class="p-2 rounded-lg bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/30 transition-colors"
-                                            >
-                                                <span class="material-symbols-outlined text-blue-500 text-sm">edit</span>
-                                            </button>
-                                            <button 
-                                                onClick={() => handleDeleteBarber(barber.name)}
-                                                class="p-2 rounded-lg bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 transition-colors"
-                                            >
-                                                <span class="material-symbols-outlined text-red-500 text-sm">delete</span>
-                                            </button>
-                                        </div>
+                                        {(barberPhone || barberEmail) && (
+                                            <div class="mt-3 pt-3 border-t border-white/5 space-y-1">
+                                                {barberPhone && (
+                                                    <div class="flex items-center gap-2 text-sm">
+                                                        <span class="material-symbols-outlined text-slate-500 text-sm">phone</span>
+                                                        <span class="text-slate-300">{barberPhone}</span>
+                                                    </div>
+                                                )}
+                                                {barberEmail && (
+                                                    <div class="flex items-center gap-2 text-sm">
+                                                        <span class="material-symbols-outlined text-slate-500 text-sm">email</span>
+                                                        <span class="text-slate-300">{barberEmail}</span>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
                                     </div>
-                                    {(barber.phone || barber.email) && (
-                                        <div class="mt-3 pt-3 border-t border-white/5 space-y-1">
-                                            {barber.phone && (
-                                                <div class="flex items-center gap-2 text-sm">
-                                                    <span class="material-symbols-outlined text-slate-500 text-sm">phone</span>
-                                                    <span class="text-slate-300">{barber.phone}</span>
-                                                </div>
-                                            )}
-                                            {barber.email && (
-                                                <div class="flex items-center gap-2 text-sm">
-                                                    <span class="material-symbols-outlined text-slate-500 text-sm">email</span>
-                                                    <span class="text-slate-300">{barber.email}</span>
-                                                </div>
-                                            )}
-                                        </div>
-                                    )}
-                                </div>
-                            ))}
+                                );
+                            })}
                         </div>
                         
                         {showAddForm && (
@@ -2484,6 +2898,33 @@
                                 </div>
                             </div>
                         )}
+                        
+                        {/* Delete Confirm Modal */}
+                        {confirmDelete && (
+                            <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
+                                <div class="bg-[#2A2D31] rounded-2xl p-6 max-w-sm w-full border border-white/10 shadow-2xl">
+                                    <div class="flex items-center justify-center w-16 h-16 rounded-full bg-red-500/20 border-2 border-red-500/50 mx-auto mb-4">
+                                        <span class="material-symbols-outlined text-red-500 text-3xl">delete</span>
+                                    </div>
+                                    <h3 class="text-white text-xl font-bold text-center mb-2">Delete Barber?</h3>
+                                    <p class="text-slate-400 text-center mb-4">Are you sure you want to delete <span class="text-white font-bold">{confirmDelete}</span>?</p>
+                                    <div class="flex gap-3">
+                                        <button 
+                                            onClick={() => setConfirmDelete(null)}
+                                            class="flex-1 px-4 py-3 bg-[#35383D] border border-white/10 rounded-xl text-white font-bold hover:bg-[#3A3D42] transition-colors"
+                                        >
+                                            Cancel
+                                        </button>
+                                        <button 
+                                            onClick={confirmDeleteBarber}
+                                            class="flex-1 px-4 py-3 bg-red-500 rounded-xl text-white font-bold hover:bg-red-600 transition-colors"
+                                        >
+                                            Delete
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        )}
                     </div>
                     
                     <div class="fixed bottom-0 left-0 right-0 z-20 bg-[#1C1E21] p-6 border-t border-white/5">
@@ -2499,12 +2940,17 @@
             );
         }
         
-        function BusinessInfo({ navigate, data }) {
+        function BusinessInfo({ navigate, data, showToast }) {
             const { businessInfo = {}, setBusinessInfo = () => {} } = data || {};
             const [formData, setFormData] = React.useState(businessInfo);
             
-            const handleSave = () => {
+            const handleSave = async () => {
+                // Save directly to storage
+                await FirebaseService.saveSetting('business_info', JSON.stringify(formData));
+                console.log('✅ Directly saved business info');
+                
                 setBusinessInfo(formData);
+                showToast ? showToast('✅ Business Info updated successfully!') : alert('✅ Business Info updated successfully!');
                 navigate('settings');
             };
             
@@ -2570,13 +3016,22 @@
                 </div>
             );
         }
-        
-        function ServicePrices({ navigate, data }) {
+
+        function ServicePrices({ navigate, data, showToast }) {
             const { servicePrices = {}, setServicePrices = () => {} } = data || {};
             const [prices, setPrices] = React.useState(servicePrices);
             
-            const handleSave = () => {
+            React.useEffect(() => {
+                setPrices(servicePrices);
+            }, [servicePrices]);
+            
+            const handleSave = async () => {
+                // Save directly to storage
+                await FirebaseService.saveSetting('service_prices', JSON.stringify(prices));
+                console.log('✅ Directly saved service prices');
+                
                 setServicePrices(prices);
+                showToast ? showToast('✅ Service prices updated successfully!') : alert('✅ Service prices updated successfully!');
                 navigate('settings');
             };
             
@@ -2612,20 +3067,34 @@
                             onClick={handleSave}
                             class="w-full h-14 bg-[#FA383E] rounded-xl text-white font-bold hover:bg-[#F35369] active:scale-[0.98] transition-all"
                         >
-                            Save Prices
+                            Save Changes
                         </button>
                     </div>
                 </div>
             );
         }
-        
-        function EditBarber({ navigate, data }) {
+
+        function EditBarber({ navigate, data, showToast }) {
             const { barber = {}, barberList = [], setBarbers = () => {} } = data || {};
             const [formData, setFormData] = React.useState(barber);
             
-            const handleSave = () => {
-                const updated = barberList.map(b => b.name === barber.name ? formData : b);
+            React.useEffect(() => {
+                setFormData(barber);
+            }, [barber]);
+            
+            const handleSave = async () => {
+                const updated = barberList.map(b => {
+                    const bName = typeof b === 'string' ? b : b.name;
+                    const barberName = typeof barber === 'string' ? barber : barber.name;
+                    return bName === barberName ? formData : b;
+                });
+                
+                // Save directly to storage
+                await FirebaseService.saveSetting('barbers', JSON.stringify(updated));
+                console.log('✅ Directly saved updated barber');
+                
                 setBarbers(updated);
+                showToast ? showToast('✅ Barber updated successfully!') : alert('✅ Barber updated successfully!');
                 navigate('manage-barbers', { barbers: updated, setBarbers });
             };
             
@@ -2682,59 +3151,235 @@
                 </div>
             );
         }
-        
-        function BarberSchedules({ navigate, data }) {
+
+        function BarberSchedules({ navigate, data, showToast }) {
             const { barbers = [], setBarbers = () => {} } = data || {};
             const [barberList, setBarberList] = React.useState(barbers);
             const [selectedBarber, setSelectedBarber] = React.useState(null);
             
-            const days = ['monday', 'tuesday', 'wednesday', 'thursday', 'friday', 'saturday', 'sunday'];
-            const dayLabels = { monday: 'Monday', tuesday: 'Tuesday', wednesday: 'Wednesday', thursday: 'Thursday', friday: 'Friday', saturday: 'Saturday', sunday: 'Sunday' };
+            React.useEffect(() => {
+                setBarberList(barbers);
+            }, [barbers]);
             
-            const handleScheduleChange = (day, value) => {
-                const updated = { ...selectedBarber, schedule: { ...selectedBarber.schedule, [day]: value } };
-                setSelectedBarber(updated);
+            const days = [
+                { key: 'monday', label: 'Monday', abbr: 'M' },
+                { key: 'tuesday', label: 'Tuesday', abbr: 'T' },
+                { key: 'wednesday', label: 'Wednesday', abbr: 'W' },
+                { key: 'thursday', label: 'Thursday', abbr: 'T' },
+                { key: 'friday', label: 'Friday', abbr: 'F' },
+                { key: 'saturday', label: 'Saturday', abbr: 'S' },
+                { key: 'sunday', label: 'Sunday', abbr: 'S' }
+            ];
+            
+            const parseDaySchedule = (schedule) => {
+                if (!schedule) return { enabled: false, start: '09:00', end: '17:00' };
+                if (schedule.toLowerCase() === 'closed' || schedule.toLowerCase() === 'off') {
+                    return { enabled: false, start: '09:00', end: '17:00' };
+                }
+                const match = schedule.match(/(\d{1,2}):(\d{2})\s*(AM|PM)?\s*-\s*(\d{1,2}):(\d{2})\s*(AM|PM)?/i);
+                if (match) {
+                    let startHour = parseInt(match[1]);
+                    const startMin = match[2];
+                    const startPeriod = match[3];
+                    let endHour = parseInt(match[4]);
+                    const endMin = match[5];
+                    const endPeriod = match[6];
+                    
+                    if (startPeriod && startPeriod.toUpperCase() === 'PM' && startHour !== 12) startHour += 12;
+                    if (startPeriod && startPeriod.toUpperCase() === 'AM' && startHour === 12) startHour = 0;
+                    if (endPeriod && endPeriod.toUpperCase() === 'PM' && endHour !== 12) endHour += 12;
+                    if (endPeriod && endPeriod.toUpperCase() === 'AM' && endHour === 12) endHour = 0;
+                    
+                    return {
+                        enabled: true,
+                        start: `${String(startHour).padStart(2, '0')}:${startMin}`,
+                        end: `${String(endHour).padStart(2, '0')}:${endMin}`
+                    };
+                }
+                return { enabled: true, start: '09:00', end: '17:00' };
             };
             
-            const handleSave = () => {
-                const updated = barberList.map(b => b.name === selectedBarber.name ? selectedBarber : b);
+            const formatTimeToDisplay = (time24) => {
+                const [hours, minutes] = time24.split(':');
+                const hour = parseInt(hours);
+                const period = hour >= 12 ? 'PM' : 'AM';
+                const displayHour = hour === 0 ? 12 : hour > 12 ? hour - 12 : hour;
+                return `${displayHour}:${minutes} ${period}`;
+            };
+            
+            const handleToggleDay = (day, currentValue) => {
+                if (!selectedBarber) return;
+                const schedule = selectedBarber.schedule || {};
+                const newSchedule = {
+                    ...schedule,
+                    [day]: currentValue.enabled ? 'Closed' : '9:00 AM - 5:00 PM'
+                };
+                setSelectedBarber({ ...selectedBarber, schedule: newSchedule });
+            };
+            
+            const handleTimeChange = (day, type, value) => {
+                if (!selectedBarber) return;
+                const schedule = selectedBarber.schedule || {};
+                const current = parseDaySchedule(schedule[day]);
+                const newStart = type === 'start' ? value : current.start;
+                const newEnd = type === 'end' ? value : current.end;
+                const formatted = `${formatTimeToDisplay(newStart)} - ${formatTimeToDisplay(newEnd)}`;
+                setSelectedBarber({
+                    ...selectedBarber,
+                    schedule: { ...schedule, [day]: formatted }
+                });
+            };
+            
+            const handleSave = async () => {
+                const updated = barberList.map(b => 
+                    (typeof b === 'string' ? b : b.name) === (typeof selectedBarber === 'string' ? selectedBarber : selectedBarber.name) 
+                        ? selectedBarber 
+                        : b
+                );
                 setBarberList(updated);
+                
+                // Save directly to storage
+                await FirebaseService.saveSetting('barbers', JSON.stringify(updated));
+                console.log('✅ Directly saved barber schedule');
+                
                 setBarbers(updated);
+                showToast ? showToast('✅ Schedule updated successfully!') : alert('✅ Schedule updated successfully!');
                 setSelectedBarber(null);
             };
             
+            const getActiveDaysCount = () => {
+                if (!selectedBarber || !selectedBarber.schedule) return 0;
+                return Object.values(selectedBarber.schedule).filter(s => 
+                    s && s.toLowerCase() !== 'closed' && s.toLowerCase() !== 'off'
+                ).length;
+            };
+            
             if (selectedBarber) {
+                const barberName = typeof selectedBarber === 'string' ? selectedBarber : (selectedBarber.name || 'Barber');
+                const activeDays = getActiveDaysCount();
+                const offDays = 7 - activeDays;
+                
                 return (
                     <div class="relative flex h-full min-h-screen w-full flex-col bg-[#1C1E21]">
-                        <div class="flex items-center gap-3 p-4 justify-between border-b border-white/5">
-                            <button onClick={() => setSelectedBarber(null)} class="text-white flex items-center justify-center rounded-full hover:bg-white/10 transition-colors p-2">
+                        <div class="sticky top-0 z-20 flex items-center bg-[#1C1E21]/90 backdrop-blur-md p-4 pb-2 justify-between border-b border-white/5">
+                            <button onClick={() => setSelectedBarber(null)} class="text-white flex size-10 shrink-0 items-center justify-center rounded-full hover:bg-white/10 transition-colors">
                                 <span class="material-symbols-outlined">arrow_back</span>
                             </button>
-                            <h2 class="text-white text-lg font-bold flex-1 text-center">{selectedBarber.name}'s Schedule</h2>
-                            <div class="w-10"></div>
-                        </div>
-                        
-                        <div class="flex-1 p-4 pb-24 space-y-3">
-                            {days.map(day => (
-                                <div key={day} class="bg-[#2A2D31] rounded-xl p-4 border border-white/5">
-                                    <label class="text-white font-semibold mb-2 block">{dayLabels[day]}</label>
-                                    <input 
-                                        type="text"
-                                        value={selectedBarber.schedule?.[day] || ''}
-                                        onChange={(e) => handleScheduleChange(day, e.target.value)}
-                                        placeholder="e.g., 9:00 AM - 7:00 PM or Closed"
-                                        class="w-full h-10 rounded-lg border-none bg-[#35383D] px-4 text-white focus:ring-2 focus:ring-[#FA383E] focus:outline-none"
-                                    />
+                            <div class="flex flex-col items-center flex-1">
+                                <h2 class="text-white text-lg font-bold leading-tight tracking-tight">Edit Schedule</h2>
+                                <span class="text-xs text-[#FA383E] font-medium">{barberName}</span>
+                            </div>
+                            <div class="flex w-10 items-center justify-end">
+                                <div class="h-10 w-10 rounded-full bg-gradient-to-br from-[#FA383E] to-orange-500 flex items-center justify-center text-white font-bold text-lg">
+                                    {barberName.charAt(0).toUpperCase()}
                                 </div>
-                            ))}
+                            </div>
                         </div>
                         
-                        <div class="fixed bottom-0 left-0 right-0 z-20 bg-[#1C1E21] p-6 border-t border-white/5">
+                        <div class="flex-1 overflow-y-auto no-scrollbar pb-32">
+                            <div class="p-6">
+                                <div class="mb-6">
+                                    <h3 class="text-white text-xl font-bold">Weekly Availability</h3>
+                                    <p class="text-sm text-slate-400 mt-1">Configure working hours for the week. Changes apply immediately.</p>
+                                </div>
+                                
+                                <div class="space-y-4">
+                                    {days.map(day => {
+                                        const daySchedule = parseDaySchedule(selectedBarber.schedule?.[day.key]);
+                                        const isEnabled = daySchedule.enabled;
+                                        
+                                        return (
+                                            <div key={day.key} class={`relative overflow-hidden rounded-2xl border p-5 transition-all ${
+                                                isEnabled 
+                                                    ? 'bg-[#2A2D31] border-white/10' 
+                                                    : 'bg-[#2A2D31]/50 border-white/5 opacity-80 hover:opacity-100'
+                                            }`}>
+                                                <div class="flex items-center justify-between mb-4">
+                                                    <div class="flex items-center gap-3">
+                                                        <div class={`flex h-8 w-8 items-center justify-center rounded-full ${
+                                                            isEnabled ? 'bg-[#FA383E]/20 text-[#FA383E]' : 'bg-white/5 text-slate-400'
+                                                        }`}>
+                                                            <span class="text-xs font-bold">{day.abbr}</span>
+                                                        </div>
+                                                        <span class={`text-base font-bold ${
+                                                            isEnabled ? 'text-white' : 'text-slate-400 font-medium'
+                                                        }`}>{day.label}</span>
+                                                    </div>
+                                                    <label class="relative inline-block w-12 align-middle select-none">
+                                                        <input 
+                                                            type="checkbox"
+                                                            checked={isEnabled}
+                                                            onChange={() => handleToggleDay(day.key, daySchedule)}
+                                                            class="sr-only"
+                                                        />
+                                                        <div class={`block h-6 rounded-full transition-colors cursor-pointer ${
+                                                            isEnabled ? 'bg-[#FA383E]' : 'bg-slate-700'
+                                                        }`}>
+                                                            <div class={`absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-[#1C1E21] border-2 transition-transform ${
+                                                                isEnabled ? 'transform translate-x-6 border-[#FA383E]' : 'border-slate-600'
+                                                            }`}></div>
+                                                        </div>
+                                                    </label>
+                                                </div>
+                                                
+                                                {isEnabled ? (
+                                                    <div class="grid grid-cols-[1fr,auto,1fr] gap-3 items-center">
+                                                        <div class="relative group">
+                                                            <label class="block text-[10px] uppercase tracking-wider text-slate-500 mb-1.5 font-semibold">Start Time</label>
+                                                            <div class="relative flex items-center bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl px-3 py-3 transition-colors">
+                                                                <span class="material-symbols-outlined text-[#FA383E] text-xl mr-2">schedule</span>
+                                                                <input 
+                                                                    type="time"
+                                                                    value={daySchedule.start}
+                                                                    onChange={(e) => handleTimeChange(day.key, 'start', e.target.value)}
+                                                                    class="bg-transparent border-none p-0 text-lg font-bold text-white focus:ring-0 w-full font-mono"
+                                                                />
+                                                            </div>
+                                                        </div>
+                                                        <div class="pt-5 text-slate-600">
+                                                            <span class="material-symbols-outlined">arrow_forward</span>
+                                                        </div>
+                                                        <div class="relative group">
+                                                            <label class="block text-[10px] uppercase tracking-wider text-slate-500 mb-1.5 font-semibold">End Time</label>
+                                                            <div class="relative flex items-center bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl px-3 py-3 transition-colors">
+                                                                <span class="material-symbols-outlined text-slate-400 text-xl mr-2">schedule</span>
+                                                                <input 
+                                                                    type="time"
+                                                                    value={daySchedule.end}
+                                                                    onChange={(e) => handleTimeChange(day.key, 'end', e.target.value)}
+                                                                    class="bg-transparent border-none p-0 text-lg font-bold text-white focus:ring-0 w-full font-mono"
+                                                                />
+                                                            </div>
+                                                        </div>
+                                                    </div>
+                                                ) : (
+                                                    <div class="mt-2 text-xs text-slate-600 italic">Marked as Day Off</div>
+                                                )}
+                                            </div>
+                                        );
+                                    })}
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="absolute bottom-0 z-30 w-full border-t border-white/10 bg-[#1C1E21]/95 backdrop-blur-xl p-4">
+                            <div class="flex items-center justify-between text-xs text-slate-400 mb-3 px-1">
+                                <span class="flex items-center gap-1">
+                                    <span class="block size-2 rounded-full bg-[#FA383E]"></span> {activeDays} Active Days
+                                </span>
+                                <span class="flex items-center gap-1">
+                                    <span class="block size-2 rounded-full bg-slate-600"></span> {offDays} Days Off
+                                </span>
+                            </div>
                             <button 
                                 onClick={handleSave}
-                                class="w-full h-14 bg-[#FA383E] rounded-xl text-white font-bold hover:bg-[#F35369] active:scale-[0.98] transition-all"
+                                class="group relative w-full overflow-hidden rounded-xl bg-[#FA383E] px-4 py-4 text-center font-bold text-white transition-transform active:scale-[0.98] shadow-lg shadow-[#FA383E]/20"
                             >
-                                Save Schedule
+                                <span class="relative z-10 flex items-center justify-center gap-2">
+                                    <span class="material-symbols-outlined">save</span>
+                                    Update Schedule
+                                </span>
+                                <div class="absolute inset-0 bg-white/20 opacity-0 transition-opacity group-hover:opacity-100"></div>
                             </button>
                         </div>
                     </div>
@@ -2752,24 +3397,27 @@
                     </div>
                     
                     <div class="flex-1 p-4 space-y-3">
-                        {barberList.map((barber, index) => (
-                            <button 
-                                key={index}
-                                onClick={() => setSelectedBarber(barber)}
-                                class="w-full bg-[#2A2D31] rounded-xl p-4 border border-white/5 flex items-center justify-between hover:bg-[#35383D] transition-colors"
-                            >
-                                <div class="flex items-center gap-3">
-                                    <div class="w-12 h-12 rounded-full bg-[#FA383E] flex items-center justify-center text-white font-bold text-lg">
-                                        {barber.name.charAt(0)}
+                        {barberList.map((barber, index) => {
+                            const barberName = typeof barber === 'string' ? barber : (barber.name || 'Barber');
+                            return (
+                                <button 
+                                    key={index}
+                                    onClick={() => setSelectedBarber(barber)}
+                                    class="w-full bg-[#2A2D31] rounded-xl p-4 border border-white/5 flex items-center justify-between hover:bg-[#35383D] transition-colors"
+                                >
+                                    <div class="flex items-center gap-3">
+                                        <div class="w-12 h-12 rounded-full bg-[#FA383E] flex items-center justify-center text-white font-bold text-lg">
+                                            {barberName.charAt(0).toUpperCase()}
+                                        </div>
+                                        <div class="text-left">
+                                            <p class="text-white font-semibold">{barberName}</p>
+                                            <p class="text-slate-400 text-sm">Configure schedule</p>
+                                        </div>
                                     </div>
-                                    <div class="text-left">
-                                        <p class="text-white font-semibold">{barber.name}</p>
-                                        <p class="text-slate-400 text-sm">Configure schedule</p>
-                                    </div>
-                                </div>
-                                <span class="material-symbols-outlined text-slate-500">chevron_right</span>
-                            </button>
-                        ))}
+                                    <span class="material-symbols-outlined text-slate-500">chevron_right</span>
+                                </button>
+                            );
+                        })}
                     </div>
                 </div>
             );
@@ -2814,13 +3462,14 @@
                         
                         <div class="bg-[#2A2D31] rounded-xl p-6 border border-white/5">
                             <label class="text-white font-semibold mb-4 block">Free Service Value</label>
-                            <div class="flex items-center gap-4 mb-2">
-                                <span class="text-slate-400 text-3xl font-bold">$</span>
+                            <div class="flex items-center gap-3 mb-2">
+                                <span class="text-slate-400 text-2xl font-bold">$</span>
                                 <input 
                                     type="number"
                                     value={rewardPrice}
                                     onChange={(e) => setRewardPrice(parseFloat(e.target.value) || 0)}
-                                    class="flex-1 h-14 rounded-xl border-none bg-[#35383D] px-4 text-white text-2xl font-bold focus:ring-2 focus:ring-[#FA383E] focus:outline-none"
+                                    class="flex-1 h-12 rounded-xl border-none bg-[#35383D] px-4 text-white text-xl font-bold focus:ring-2 focus:ring-[#FA383E] focus:outline-none"
+                                    placeholder="0"
                                 />
                             </div>
                             <p class="text-slate-400 text-xs mt-2">
