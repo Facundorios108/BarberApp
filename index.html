@@ -112,20 +112,61 @@
         const FirebaseService = {
             // Get collection data
             async getCollection(collectionName) {
-                // Try localStorage first for faster load
+                // Try localStorage first
                 const localData = localStorage.getItem(`barberapp_${collectionName}`);
-                const parsedLocal = localData ? JSON.parse(localData) : null;
+                let parsedLocal = [];
+                try {
+                    parsedLocal = localData ? JSON.parse(localData) : [];
+                } catch (e) {
+                    console.error(`Error parsing local data for ${collectionName}:`, e);
+                    parsedLocal = [];
+                }
+                
+                // Ensure parsedLocal is an array
+                if (!Array.isArray(parsedLocal)) parsedLocal = [];
                 
                 if (!useFirebase) {
                     return parsedLocal;
                 }
                 try {
-                    const snapshot = await db.collection(collectionName).get();
-                    if (snapshot.empty) return parsedLocal;
-                    const firebaseData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-                    // Update localStorage with Firebase data
-                    localStorage.setItem(`barberapp_${collectionName}`, JSON.stringify(firebaseData));
-                    return firebaseData;
+                    // Set a timeout for Firebase requests
+                    const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 5000));
+                    const snapshotPromise = db.collection(collectionName).get();
+                    
+                    const snapshot = await Promise.race([snapshotPromise, timeoutPromise]);
+                    
+                    let firebaseData = [];
+                    if (!snapshot.empty) {
+                        firebaseData = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                    }
+                    
+                    // MERGE STRATEGY: Combine both sources and remove duplicates by ID
+                    const combined = [...parsedLocal, ...firebaseData];
+                    const uniqueMap = new Map();
+                    
+                    combined.forEach(item => {
+                        if (item && item.id) {
+                            uniqueMap.set(item.id, item);
+                        }
+                    });
+                    
+                    const mergedData = Array.from(uniqueMap.values());
+                    
+                    // Sort by timestamp if available (newest first for activities) or ID
+                    if (collectionName === 'activities') {
+                        mergedData.sort((a, b) => {
+                            const dateA = new Date(a.timestamp || 0);
+                            const dateB = new Date(b.timestamp || 0);
+                            return dateB - dateA;
+                        });
+                    }
+                    
+                    // Update localStorage with merged data so next load is up to date
+                    if (mergedData.length > 0) {
+                        localStorage.setItem(`barberapp_${collectionName}`, JSON.stringify(mergedData));
+                    }
+                    
+                    return mergedData;
                 } catch (error) {
                     console.warn(`⚠️ Firebase read failed for ${collectionName}, using localStorage:`, error.message);
                     return parsedLocal;
@@ -502,11 +543,12 @@
                     {loading ? (
                         <div class="flex items-center justify-center min-h-screen bg-[#1C1E21]">
                             <div class="text-center">
-                                <div class="animate-spin rounded-full h-16 w-16 border-b-2 border-[#FA383E] mx-auto mb-4"></div>
-                                <p class="text-white text-lg font-semibold">Loading BarberApp...</p>
-                                <p class="text-slate-400 text-sm mt-2">
-                                    {useFirebase ? 'Syncing with Firebase' : 'Loading from local storage'}
-                                </p>
+                                <img 
+                                    src="Images/hor-barber-logo.png" 
+                                    class="h-24 w-24 object-contain mx-auto mb-6 animate-[spin_3s_linear_infinite]" 
+                                    alt="Loading..."
+                                />
+                                <p class="text-white text-lg font-bold tracking-tight">Loading...</p>
                             </div>
                         </div>
                     ) : (
@@ -647,23 +689,33 @@
                         <div class="flex flex-col gap-3">
                             {recentActivities.length > 0 ? (
                                 recentActivities.map(activity => {
+                                    // Try to find client, but don't fail if deleted
                                     const client = clients.find(c => c.id === activity.clientId);
-                                    if (!client) return null;
-                                    const level = getClientLevel(client.visits || 0);
+                                    
+                                    // Fallback values if client is deleted
+                                    const clientName = client ? client.name : (activity.clientName || 'Unknown Client');
+                                    const visits = client ? (client.visits || 0) : 0;
+                                    const level = getClientLevel(visits);
+                                    
                                     const activityTime = new Date(activity.timestamp);
                                     const timeStr = activityTime.toLocaleTimeString('en-US', {hour: '2-digit', minute: '2-digit'});
                                     
                                     return (
-                                        <div key={activity.id} onClick={() => navigate('client-profile', client)} class="flex items-center gap-4 p-3 bg-[#2A2D31] rounded-xl border border-white/5 hover:border-[#FA383E]/50 transition-colors cursor-pointer">
+                                        <div 
+                                            key={activity.id} 
+                                            onClick={() => client && navigate('client-profile', client)} 
+                                            class={`flex items-center gap-4 p-3 bg-[#2A2D31] rounded-xl border border-white/5 hover:border-[#FA383E]/50 transition-colors ${client ? 'cursor-pointer' : 'cursor-default opacity-80'}`}
+                                        >
                                             <div class="relative shrink-0">
-                                                {client.image ? (
+                                                {client && client.image ? (
                                                     <div class="h-12 w-12 rounded-full bg-cover bg-center" style={{backgroundImage: `url("${client.image}")`}}></div>
                                                 ) : (
                                                     <div class="h-12 w-12 rounded-full bg-[#2A2D31] border-2 border-[#FA383E] flex items-center justify-center text-[#FA383E] font-bold text-lg">
-                                                        {client.name.charAt(0)}
+                                                        {clientName.charAt(0).toUpperCase()}
                                                     </div>
                                                 )}
-                                                {level && (
+                                                {/* Only show badge if client still exists */}
+                                                {client && level && (
                                                     <div class="absolute -bottom-1 -right-1 rounded-full p-0.5 border-2 border-[#1C1E21]" style={{backgroundColor: level.bgColor}} title={`${level.name} Member`}>
                                                         <span class="material-symbols-outlined text-white" style={{fontSize: '14px'}}>{level.icon}</span>
                                                     </div>
@@ -671,10 +723,12 @@
                                             </div>
                                             <div class="flex flex-col flex-1 min-w-0">
                                                 <div class="flex justify-between items-start">
-                                                    <p class="text-base font-bold text-white truncate">{client.name}</p>
+                                                    <p class="text-base font-bold text-white truncate">{clientName}</p>
                                                     <span class="text-xs font-medium text-slate-500">{timeStr}</span>
                                                 </div>
-                                                <p class="text-sm text-slate-400 truncate">{activity.service} - {activity.barber}</p>
+                                                <p class="text-sm text-slate-400 truncate">
+                                                    {activity.service} - {activity.barber} {!client && '(Deleted)'}
+                                                </p>
                                             </div>
                                         </div>
                                     );
@@ -1639,23 +1693,32 @@
             const [selectedBarber, setSelectedBarber] = React.useState('');
             const [notes, setNotes] = React.useState('');
             
+            const [services, setServices] = React.useState([
+                {id: 'fade', name: 'Fade', icon: 'content_cut'},
+                {id: 'beard', name: 'Beard', icon: 'face'},
+                {id: 'fullcut', name: 'Full Cut', icon: 'cut'},
+                {id: 'scissors', name: 'Scissors', icon: 'content_cut'},
+            ]);
+
             React.useEffect(() => {
                 const storedBarbers = JSON.parse(localStorage.getItem('barberapp_barbers') || '["Juan", "Nico", "Pedro"]');
                 setBarbers(storedBarbers);
                 
+                // Load services
+                const storedServices = localStorage.getItem('barberapp_services');
+                if (storedServices) {
+                    setServices(JSON.parse(storedServices));
+                } else {
+                    // Initialize if empty
+                    localStorage.setItem('barberapp_services', JSON.stringify(services));
+                }
+
                 // Set first barber as default
                 if (storedBarbers.length > 0) {
                     const firstBarber = typeof storedBarbers[0] === 'string' ? storedBarbers[0] : storedBarbers[0].name;
                     setSelectedBarber(firstBarber);
                 }
             }, []);
-            
-            const services = [
-                {id: 'fade', name: 'Fade', icon: 'content_cut'},
-                {id: 'beard', name: 'Beard', icon: 'face'},
-                {id: 'fullcut', name: 'Full Cut', icon: 'cut'},
-                {id: 'scissors', name: 'Scissors', icon: 'content_cut'},
-            ];
             
             const handleConfirmVisit = () => {
                 if (!client) {
@@ -1998,8 +2061,12 @@
                 return (
                     <div class="flex items-center justify-center min-h-screen bg-[#1C1E21]">
                         <div class="text-center">
-                            <div class="animate-spin rounded-full h-12 w-12 border-b-2 border-[#FA383E] mx-auto mb-3"></div>
-                            <p class="text-white text-sm">Loading settings...</p>
+                            <img 
+                                src="Images/hor-barber-logo.png" 
+                                class="h-20 w-20 object-contain mx-auto mb-4 animate-[spin_3s_linear_infinite]" 
+                                alt="Loading..." 
+                            />
+                            <p class="text-white text-lg font-bold tracking-tight">Loading...</p>
                         </div>
                     </div>
                 );
@@ -2068,8 +2135,8 @@
                                         <span class="material-symbols-outlined text-[#FA383E]">payments</span>
                                     </div>
                                     <div class="text-left">
-                                        <p class="text-white font-semibold">Service Prices</p>
-                                        <p class="text-slate-400 text-sm">Set prices for services</p>
+                                        <p class="text-white font-semibold">Services & Prices</p>
+                                        <p class="text-slate-400 text-sm">Manage services and pricing</p>
                                     </div>
                                 </div>
                                 <span class="material-symbols-outlined text-slate-500">chevron_right</span>
@@ -2137,13 +2204,57 @@
             const [customEndDate, setCustomEndDate] = React.useState('');
             const [showCustomDates, setShowCustomDates] = React.useState(false);
             
-            // Service prices
-            const servicePrices = {
-                'Fade': 30,
-                'Beard': 20,
-                'Full Cut': 45,
-                'Scissors': 35
-            };
+            // Service prices - Load from storage
+            const servicePrices = React.useMemo(() => {
+                try {
+                    const saved = localStorage.getItem('barberapp_service_prices');
+                    // Default values just in case
+                    return saved ? JSON.parse(saved) : {
+                        'Fade': 30,
+                        'Beard': 20,
+                        'Full Cut': 45,
+                        'Scissors': 35
+                    };
+                } catch (e) {
+                    console.error("Error loading service prices in analytics", e);
+                    return {};
+                }
+            }, []);
+            
+            // Service prices helper
+            const getServicePrice = React.useCallback((serviceName) => {
+                // 1. Direct match
+                if (servicePrices[serviceName] !== undefined) {
+                    return servicePrices[serviceName];
+                }
+                
+                // 2. Try to match historical names to current IDs/Names
+                // Load services definitions if available (cached)
+                try {
+                    const localDefs = localStorage.getItem('barberapp_services');
+                    const servicesList = localDefs ? JSON.parse(localDefs) : [];
+                    
+                    // Known default mappings (Historical Name -> original ID)
+                    const legacyMap = {
+                        'Fade': 'fade',
+                        'Beard': 'beard',
+                        'Full Cut': 'fullcut',
+                        'Scissors': 'scissors'
+                    };
+                    
+                    const id = legacyMap[serviceName];
+                    if (id) {
+                        // Find what the name of this ID is NOW
+                        const currentDef = servicesList.find(s => s.id === id);
+                        if (currentDef && currentDef.name) {
+                            // Look up price for CURRENT name
+                            return servicePrices[currentDef.name] || 0;
+                        }
+                    }
+                } catch(e) { console.error(e); }
+                
+                return 0;
+            }, [servicePrices]);
             
             // Filter activities by period
             const getFilteredActivities = () => {
@@ -2204,12 +2315,16 @@
             
             // Calculate revenue
             const revenue = filteredActivities.reduce((sum, activity) => {
-                return sum + (servicePrices[activity.service] || 0);
+                return sum + (getServicePrice(activity.service) || 0);
             }, 0);
             
             const prevRevenue = previousActivities.reduce((sum, activity) => {
-                return sum + (servicePrices[activity.service] || 0);
+                return sum + (getServicePrice(activity.service) || 0);
             }, 0);
+            
+            const formatNumber = (num) => {
+                return num.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".");
+            };
             
             const revenueChange = prevRevenue > 0 
                 ? ((revenue - prevRevenue) / prevRevenue * 100).toFixed(0)
@@ -2222,29 +2337,49 @@
                 ? ((servicesCount - prevServicesCount) / prevServicesCount * 100).toFixed(0)
                 : (servicesCount > 0 ? 100 : 0);
             
-            // New clients in period - clients who had their first ever visit in this period
-            const periodStart = selectedPeriod === 'today' 
-                ? new Date(new Date().setHours(0, 0, 0, 0))
-                : selectedPeriod === 'week'
-                ? new Date(Date.now() - 7 * 24 * 60 * 60 * 1000)
-                : new Date(new Date().getFullYear(), new Date().getMonth(), 1);
-            
-            // Find unique client IDs in filtered activities
-            const clientIdsInPeriod = new Set(filteredActivities.map(a => a.clientId));
-            
-            // Count clients whose FIRST activity was in this period
-            const newClientsCount = Array.from(clientIdsInPeriod).filter(clientId => {
-                // Get all activities for this client, sorted by date
-                const clientActivities = activities
-                    .filter(a => a.clientId === clientId)
-                    .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+            // New Clients Calculation (Based on Date Created or First Visit)
+            const countNewClients = () => {
+                const now = new Date();
+                let startOfPeriod;
                 
-                if (clientActivities.length === 0) return false;
+                if (selectedPeriod === 'today') {
+                    startOfPeriod = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+                } else if (selectedPeriod === 'week') {
+                    const d = new Date(now);
+                    d.setDate(d.getDate() - 7);
+                    startOfPeriod = d;
+                } else if (selectedPeriod === 'month') {
+                    startOfPeriod = new Date(now.getFullYear(), now.getMonth(), 1);
+                } else {
+                    return 0; // Custom range logic omitted for brevity, adding if needed
+                }
                 
-                // Check if the first activity was in the selected period
-                const firstActivity = clientActivities[0];
-                return new Date(firstActivity.timestamp) >= periodStart;
-            }).length;
+                // Method 1: Count clients created in this period (if we had createdAt)
+                // Method 2 (Current): Count clients whose FIRST visit is in this period
+                
+                // 1. Get all unique clients who had activity in this period
+                const activeClientIdsThisPeriod = new Set(filteredActivities.map(a => a.clientId));
+                
+                let count = 0;
+                activeClientIdsThisPeriod.forEach(clientId => {
+                    // Get ALL history for this client
+                    const history = activities
+                        .filter(a => a.clientId === clientId)
+                        .sort((a, b) => new Date(a.timestamp) - new Date(b.timestamp));
+                        
+                    if(history.length > 0) {
+                        const firstEverVisit = new Date(history[0].timestamp);
+                        // If their first ever visit is >= start of this period, they are "New"
+                        if (firstEverVisit >= startOfPeriod) {
+                            count++;
+                        }
+                    }
+                });
+                
+                return count;
+            };
+
+            const newClientsCount = countNewClients();
             
             // Average ticket
             const avgTicket = servicesCount > 0 ? (revenue / servicesCount).toFixed(0) : 0;
@@ -2372,7 +2507,7 @@
                                 </div>
                             </div>
                             <p class="text-slate-400 text-xs mb-1">Revenue</p>
-                            <p class="text-white text-2xl font-bold">${revenue}</p>
+                            <p class="text-white text-2xl font-bold">${formatNumber(revenue)}</p>
                             {revenueChange != 0 && (
                                 <p class={`text-xs mt-1 ${revenueChange > 0 ? 'text-green-500' : 'text-red-500'}`}>
                                     {revenueChange > 0 ? '↑' : '↓'} {Math.abs(revenueChange)}% vs {getPeriodLabel()}
@@ -2409,7 +2544,7 @@
                                 </div>
                             </div>
                             <p class="text-slate-400 text-xs mb-1">Avg. Ticket</p>
-                            <p class="text-white text-2xl font-bold">${avgTicket}</p>
+                            <p class="text-white text-2xl font-bold">${formatNumber(avgTicket)}</p>
                             {avgTicketChange != 0 && (
                                 <p class={`text-xs mt-1 ${avgTicketChange > 0 ? 'text-green-500' : 'text-red-500'}`}>
                                     {avgTicketChange > 0 ? '↑' : '↓'} {Math.abs(avgTicketChange)}% vs {getPeriodLabel()}
@@ -2424,17 +2559,18 @@
                         {topServices.length > 0 ? (
                             <div class="space-y-2">
                                 {topServices.map(([service, count]) => {
-                                    const revenue = count * (servicePrices[service] || 0);
+                                    const price = getServicePrice(service) || 0;
+                                    const revenue = count * price;
                                     return (
                                         <div key={service} class="bg-[#2A2D31] rounded-xl p-4 border border-white/5">
                                             <div class="flex items-center justify-between mb-3">
                                                 <div>
                                                     <p class="text-white font-semibold">{service}</p>
-                                                    <p class="text-slate-400 text-xs mt-0.5">${servicePrices[service]} per service</p>
+                                                    <p class="text-slate-400 text-xs mt-0.5">${formatNumber(price)} per service</p>
                                                 </div>
                                                 <div class="text-right">
                                                     <p class="text-[#FA383E] font-bold">{count} times</p>
-                                                    <p class="text-slate-400 text-xs">${revenue} total</p>
+                                                    <p class="text-slate-400 text-xs">${formatNumber(revenue)} total</p>
                                                 </div>
                                             </div>
                                             <div class="w-full bg-white/10 rounded-full h-2">
@@ -3019,19 +3155,55 @@
 
         function ServicePrices({ navigate, data, showToast }) {
             const { servicePrices = {}, setServicePrices = () => {} } = data || {};
-            const [prices, setPrices] = React.useState(servicePrices);
+            const [editableServices, setEditableServices] = React.useState([]);
             
             React.useEffect(() => {
-                setPrices(servicePrices);
+                // Load services definitions from localStorage
+                let servicesList;
+                try {
+                    const local = localStorage.getItem('barberapp_services');
+                    servicesList = local ? JSON.parse(local) : [
+                        {id: 'fade', name: 'Fade', icon: 'content_cut'},
+                        {id: 'beard', name: 'Beard', icon: 'face'},
+                        {id: 'fullcut', name: 'Full Cut', icon: 'cut'},
+                        {id: 'scissors', name: 'Scissors', icon: 'content_cut'},
+                    ];
+                } catch(e) {
+                    console.error('Error loading services:', e);
+                    servicesList = [
+                        {id: 'fade', name: 'Fade', icon: 'content_cut'},
+                        {id: 'beard', name: 'Beard', icon: 'face'},
+                        {id: 'fullcut', name: 'Full Cut', icon: 'cut'},
+                        {id: 'scissors', name: 'Scissors', icon: 'content_cut'},
+                    ];
+                }
+
+                // Map to editable structure
+                const mapped = servicesList.map(s => ({
+                    ...s,
+                    // Try to match by name, otherwise default to 0
+                    price: servicePrices[s.name] || 0
+                }));
+                setEditableServices(mapped);
             }, [servicePrices]);
             
             const handleSave = async () => {
+                // 1. Save definitions (Names updated)
+                const definitions = editableServices.map(({id, name, icon}) => ({id, name, icon}));
+                localStorage.setItem('barberapp_services', JSON.stringify(definitions));
+                
+                // 2. Save Prices (Mapped by Name)
+                const newPrices = {};
+                editableServices.forEach(s => {
+                    newPrices[s.name] = parseFloat(s.price) || 0;
+                });
+                
                 // Save directly to storage
-                await FirebaseService.saveSetting('service_prices', JSON.stringify(prices));
+                await FirebaseService.saveSetting('service_prices', JSON.stringify(newPrices));
                 console.log('✅ Directly saved service prices');
                 
-                setServicePrices(prices);
-                showToast ? showToast('✅ Service prices updated successfully!') : alert('✅ Service prices updated successfully!');
+                setServicePrices(newPrices);
+                showToast ? showToast('✅ Services updated successfully!') : alert('✅ Services updated successfully!');
                 navigate('settings');
             };
             
@@ -3041,22 +3213,48 @@
                         <button onClick={() => navigate('settings')} class="text-white flex items-center justify-center rounded-full hover:bg-white/10 transition-colors p-2">
                             <span class="material-symbols-outlined">arrow_back</span>
                         </button>
-                        <h2 class="text-white text-lg font-bold flex-1 text-center">Service Prices</h2>
+                        <h2 class="text-white text-lg font-bold flex-1 text-center">Manage Services</h2>
                         <div class="w-10"></div>
                     </div>
                     
                     <div class="flex-1 p-6 pb-24 space-y-4">
-                        {Object.keys(prices).map((service) => (
-                            <div key={service} class="bg-[#2A2D31] rounded-xl p-4 border border-white/5">
-                                <label class="text-white font-semibold mb-3 block">{service}</label>
-                                <div class="flex items-center gap-3">
-                                    <span class="text-slate-400 text-xl">$</span>
-                                    <input 
-                                        type="number"
-                                        value={prices[service]}
-                                        onChange={(e) => setPrices({...prices, [service]: parseFloat(e.target.value) || 0})}
-                                        class="flex-1 h-12 rounded-lg border-none bg-[#35383D] px-4 text-white text-lg font-bold focus:ring-2 focus:ring-[#FA383E] focus:outline-none"
-                                    />
+                        {editableServices.map((service, index) => (
+                            <div key={service.id} class="bg-[#2A2D31] rounded-xl p-4 border border-white/5">
+                                <div class="flex flex-col gap-3">
+                                    {/* Name Edit */}
+                                    <div>
+                                        <label class="text-slate-400 text-xs uppercase tracking-wider font-bold mb-1.5 block">Service Name</label>
+                                        <div class="flex items-center gap-2">
+                                            <span class="material-symbols-outlined text-slate-500">{service.icon}</span>
+                                            <input 
+                                                type="text"
+                                                value={service.name}
+                                                onChange={(e) => {
+                                                    const newValue = e.target.value;
+                                                    setEditableServices(prev => prev.map((s, i) => i === index ? {...s, name: newValue} : s));
+                                                }}
+                                                class="flex-1 h-10 rounded-lg border border-white/10 bg-[#35383D] px-3 text-white text-base font-medium focus:ring-2 focus:ring-[#FA383E] focus:outline-none placeholder:text-slate-600"
+                                                placeholder="Service Name"
+                                            />
+                                        </div>
+                                    </div>
+                                    
+                                    {/* Price Edit */}
+                                    <div>
+                                        <label class="text-slate-400 text-xs uppercase tracking-wider font-bold mb-1.5 block">Price</label>
+                                        <div class="flex items-center gap-3">
+                                            <span class="text-slate-400 text-xl font-bold">$</span>
+                                            <input 
+                                                type="number"
+                                                value={service.price}
+                                                onChange={(e) => {
+                                                    const newValue = e.target.value;
+                                                    setEditableServices(prev => prev.map((s, i) => i === index ? {...s, price: newValue} : s));
+                                                }}
+                                                class="flex-1 h-10 rounded-lg border-none bg-[#35383D] px-3 text-white text-lg font-bold focus:ring-2 focus:ring-[#FA383E] focus:outline-none"
+                                            />
+                                        </div>
+                                    </div>
                                 </div>
                             </div>
                         ))}
@@ -3065,8 +3263,9 @@
                     <div class="fixed bottom-0 left-0 right-0 z-20 bg-[#1C1E21] p-6 border-t border-white/5">
                         <button 
                             onClick={handleSave}
-                            class="w-full h-14 bg-[#FA383E] rounded-xl text-white font-bold hover:bg-[#F35369] active:scale-[0.98] transition-all"
+                            class="w-full h-14 bg-[#FA383E] rounded-xl text-white font-bold hover:bg-[#F35369] active:scale-[0.98] transition-all flex items-center justify-center gap-2"
                         >
+                            <span class="material-symbols-outlined">save</span>
                             Save Changes
                         </button>
                     </div>
@@ -3170,6 +3369,24 @@
                 { key: 'saturday', label: 'Saturday', abbr: 'S' },
                 { key: 'sunday', label: 'Sunday', abbr: 'S' }
             ];
+            
+            const timeOptions = React.useMemo(() => {
+                const options = [];
+                for (let i = 0; i < 24; i++) {
+                    for (let j = 0; j < 60; j += 30) {
+                        const hour = i.toString().padStart(2, '0');
+                        const minute = j.toString().padStart(2, '0');
+                        const time = `${hour}:${minute}`;
+                        
+                        const period = i >= 12 ? 'PM' : 'AM';
+                        const displayHour = i === 0 ? 12 : i > 12 ? i - 12 : i;
+                        const label = `${displayHour}:${minute} ${period}`;
+                        
+                        options.push({ value: time, label });
+                    }
+                }
+                return options;
+            }, []);
             
             const parseDaySchedule = (schedule) => {
                 if (!schedule) return { enabled: false, start: '09:00', end: '17:00' };
@@ -3327,13 +3544,23 @@
                                                         <div class="relative group">
                                                             <label class="block text-[10px] uppercase tracking-wider text-slate-500 mb-1.5 font-semibold">Start Time</label>
                                                             <div class="relative flex items-center bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl px-3 py-3 transition-colors">
-                                                                <span class="material-symbols-outlined text-[#FA383E] text-xl mr-2">schedule</span>
-                                                                <input 
-                                                                    type="time"
-                                                                    value={daySchedule.start}
-                                                                    onChange={(e) => handleTimeChange(day.key, 'start', e.target.value)}
-                                                                    class="bg-transparent border-none p-0 text-lg font-bold text-white focus:ring-0 w-full font-mono"
-                                                                />
+                                                                <span class="material-symbols-outlined text-[#FA383E] text-xl mr-3">schedule</span>
+                                                                <div class="relative flex-1 min-w-0">
+                                                                    <select 
+                                                                        value={daySchedule.start}
+                                                                        onChange={(e) => handleTimeChange(day.key, 'start', e.target.value)}
+                                                                        class="bg-transparent bg-none border-none p-0 text-base font-bold text-white focus:ring-0 w-full font-mono appearance-none cursor-pointer pr-5"
+                                                                    >
+                                                                        {timeOptions.map(option => (
+                                                                            <option key={option.value} value={option.value} class="text-black bg-white">
+                                                                                {option.label}
+                                                                            </option>
+                                                                        ))}
+                                                                    </select>
+                                                                    <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center pl-2">
+                                                                        <span class="material-symbols-outlined text-sm text-slate-400">expand_more</span>
+                                                                    </div>
+                                                                </div>
                                                             </div>
                                                         </div>
                                                         <div class="pt-5 text-slate-600">
@@ -3342,13 +3569,23 @@
                                                         <div class="relative group">
                                                             <label class="block text-[10px] uppercase tracking-wider text-slate-500 mb-1.5 font-semibold">End Time</label>
                                                             <div class="relative flex items-center bg-white/5 hover:bg-white/10 border border-white/10 rounded-xl px-3 py-3 transition-colors">
-                                                                <span class="material-symbols-outlined text-slate-400 text-xl mr-2">schedule</span>
-                                                                <input 
-                                                                    type="time"
-                                                                    value={daySchedule.end}
-                                                                    onChange={(e) => handleTimeChange(day.key, 'end', e.target.value)}
-                                                                    class="bg-transparent border-none p-0 text-lg font-bold text-white focus:ring-0 w-full font-mono"
-                                                                />
+                                                                <span class="material-symbols-outlined text-slate-400 text-xl mr-3">schedule</span>
+                                                                <div class="relative flex-1 min-w-0">
+                                                                    <select 
+                                                                        value={daySchedule.end}
+                                                                        onChange={(e) => handleTimeChange(day.key, 'end', e.target.value)}
+                                                                        class="bg-transparent bg-none border-none p-0 text-base font-bold text-white focus:ring-0 w-full font-mono appearance-none cursor-pointer pr-5"
+                                                                    >
+                                                                        {timeOptions.map(option => (
+                                                                            <option key={option.value} value={option.value} class="text-black bg-white">
+                                                                                {option.label}
+                                                                            </option>
+                                                                        ))}
+                                                                    </select>
+                                                                    <div class="pointer-events-none absolute inset-y-0 right-0 flex items-center pl-2">
+                                                                        <span class="material-symbols-outlined text-sm text-slate-400">expand_more</span>
+                                                                    </div>
+                                                                </div>
                                                             </div>
                                                         </div>
                                                     </div>
