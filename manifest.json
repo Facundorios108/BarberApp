@@ -1,0 +1,21 @@
+{
+  "name": "HOR Barber",
+  "short_name": "HOR Barber",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#1C1E21",
+  "theme_color": "#1C1E21",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "Images/hor-barber-logo.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "Images/hor-barber-logo.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
