@@ -116,6 +116,8 @@
             }
             db = firebase.firestore();
             auth = firebase.auth();
+            // CRÍTICO: Configurar persistencia LOCAL para PWAs
+            auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL);
             useFirebase = true;
             console.log('✅ Firebase initialized successfully');
         } catch (error) {
@@ -474,16 +476,39 @@
         function SetupBusiness({ onSetupComplete, user }) {
             const [businessName, setBusinessName] = useState('');
             const [creating, setCreating] = useState(false);
+            const [error, setError] = useState('');
 
             const handleCreate = async () => {
-                if (!businessName.trim()) return alert('Please enter a business name');
-                setCreating(true);
+                if (!businessName.trim()) {
+                    setError('Por favor ingresa un nombre para tu barbería');
+                    return;
+                }
                 
-                // Create a simple ID from name
+                setCreating(true);
+                setError('');
+                
+                // Crear ID basado en el nombre
                 const barbershopId = businessName.toLowerCase().replace(/[^a-z0-9]/g, '-') + '-' + Math.floor(Math.random() * 1000);
                 
                 try {
-                    // 1. Create User Profile linked to this barbershop
+                    // Verificar si ya existe una barbería con este nombre
+                    const existingShops = await db.collection('barbershops').where('name', '==', businessName).get();
+                    
+                    if (!existingShops.empty) {
+                        setError('Ya existe una barbería con ese nombre. Por favor elige otro.');
+                        setCreating(false);
+                        return;
+                    }
+                    
+                    // 1. Crear documento de barbershop
+                    await db.collection('barbershops').doc(barbershopId).set({
+                        name: businessName,
+                        owner: user.uid,
+                        createdAt: new Date().toISOString(),
+                        members: [user.uid]
+                    });
+                    
+                    // 2. Crear User Profile vinculado a esta barbershop
                     await FirebaseService.createUserProfile(user.uid, {
                         email: user.email,
                         displayName: user.displayName,
@@ -492,7 +517,7 @@
                         joinedAt: new Date().toISOString()
                     });
                     
-                    // 2. Initialize default Business Info in the NEW scope
+                    // 3. Configurar scope e inicializar data
                     FirebaseService.setScope(barbershopId);
                     
                     const defaultBusinessInfo = {
@@ -508,7 +533,7 @@
                     onSetupComplete(barbershopId);
                 } catch (error) {
                     console.error("Error setting up business", error);
-                    alert("Error creating business. Please try again.");
+                    setError("Error al crear la barbería: " + error.message);
                 } finally {
                     setCreating(false);
                 }
@@ -521,28 +546,34 @@
                              <div className="w-16 h-16 bg-[#FA383E]/20 rounded-full flex items-center justify-center mx-auto mb-4">
                                 <span className="material-symbols-outlined text-[#FA383E] text-3xl">store</span>
                             </div>
-                            <h2 className="text-2xl font-bold text-white">Create Your Business</h2>
-                            <p className="text-slate-400 mt-2">Welcome {user.displayName}! Let's set up your new workspace.</p>
+                            <h2 className="text-2xl font-bold text-white">Crea tu Barbería</h2>
+                            <p className="text-slate-400 mt-2">Bienvenido {user.displayName}! Configura tu espacio de trabajo.</p>
                         </div>
                         
                         <div className="space-y-4 text-left">
                             <div>
-                                <label className="text-white text-sm font-medium mb-1 block">Barbershop Name</label>
+                                <label className="text-white text-sm font-medium mb-1 block">Nombre de la Barbería</label>
                                 <input 
                                     type="text" 
                                     value={businessName}
-                                    onChange={(e) => setBusinessName(e.target.value)}
-                                    placeholder="e.g. Downtown Cuts"
+                                    onChange={(e) => {
+                                        setBusinessName(e.target.value);
+                                        setError('');
+                                    }}
+                                    placeholder="ej. Downtown Cuts"
                                     className="w-full h-12 rounded-xl bg-[#1C1E21] border border-white/10 px-4 text-white focus:ring-2 focus:ring-[#FA383E] focus:outline-none"
                                 />
+                                {error && (
+                                    <p className="text-red-500 text-xs mt-2">{error}</p>
+                                )}
                             </div>
                             
                             <button 
                                 onClick={handleCreate}
                                 disabled={creating}
-                                className="w-full bg-[#FA383E] text-white font-bold py-3.5 rounded-xl hover:bg-[#D42F34] transition-colors mt-2 flex items-center justify-center gap-2"
+                                className="w-full bg-[#FA383E] text-white font-bold py-3.5 rounded-xl hover:bg-[#D42F34] transition-colors mt-2 flex items-center justify-center gap-2 disabled:opacity-50 disabled:cursor-not-allowed"
                             >
-                                {creating ? 'Setting up...' : 'Start Managing'}
+                                {creating ? 'Configurando...' : 'Comenzar'}
                                 {!creating && <span className="material-symbols-outlined">arrow_forward</span>}
                             </button>
                         </div>
@@ -572,65 +603,76 @@
 
             // Handle Auth State & Redirect Result
             React.useEffect(() => {
-                if (useFirebase && auth) {
-                    let isProcessing = false;
-                    
-                    // Check for redirect result first
-                    auth.getRedirectResult().then(async (result) => {
-                        if (result.user && !isProcessing) {
-                            isProcessing = true;
-                            console.log("✅ Login exitoso via redirect");
-                            // Marcar que el usuario se acaba de loguear
-                            localStorage.setItem('auth_just_logged_in', 'true');
+                if (!useFirebase || !auth) {
+                    setAuthLoading(false);
+                    return;
+                }
+
+                let processed = false;
+
+                // Manejar resultado del redirect
+                auth.getRedirectResult()
+                    .then((result) => {
+                        if (result && result.user) {
+                            console.log("✅ Google login exitoso:", result.user.email);
+                            processed = true;
                         }
-                    }).catch((error) => {
-                        console.error("Redirect error:", error);
-                        if (error.code !== 'auth/popup-closed-by-user') {
-                            showToast('Error: ' + error.message, 'error');
-                        }
+                    })
+                    .catch((error) => {
+                        console.error("❌ Error en redirect:", error.code, error.message);
                     });
 
-                    const unsubscribe = auth.onAuthStateChanged(async (currentUser) => {
-                        if (isProcessing) return; // Evitar procesamiento duplicado
-                        
-                        if(currentUser) {
-                            console.log("👤 Usuario detectado:", currentUser.email);
-                            setUser(currentUser);
+                // Escuchar cambios en el estado de autenticación
+                const unsubscribe = auth.onAuthStateChanged(async (currentUser) => {
+                    console.log("🔄 Auth state changed. User:", currentUser?.email || "null");
+                    
+                    if (currentUser) {
+                        try {
+                            console.log("🔍 Buscando perfil para UID:", currentUser.uid);
+                            const userProfile = await FirebaseService.getUserProfile(currentUser.uid);
+                            console.log("📋 Perfil encontrado:", JSON.stringify(userProfile, null, 2));
                             
-                            // Check if we just logged in
-                            const justLoggedIn = localStorage.getItem('auth_just_logged_in');
-                            
-                            try {
-                                const userProfile = await FirebaseService.getUserProfile(currentUser.uid);
-                                if (userProfile && userProfile.barbershopId) {
-                                    console.log("🏪 Barbershop encontrado:", userProfile.barbershopId);
-                                    setBarbershopId(userProfile.barbershopId);
-                                    FirebaseService.setScope(userProfile.barbershopId);
-                                    localStorage.removeItem('auth_just_logged_in');
-                                    await loadData();
-                                } else {
-                                    console.log("⚠️ Usuario sin barbershop, mostrar setup");
-                                    setBarbershopId(null);
-                                    localStorage.removeItem('auth_just_logged_in');
-                                }
-                            } catch (e) {
-                                console.error("Error cargando perfil:", e);
+                            if (userProfile?.barbershopId) {
+                                console.log("✅ Usuario tiene barbería:", userProfile.barbershopId);
+                                console.log("🏪 Cargando datos de la barbería...");
+                                
+                                // Establecer TODO al mismo tiempo para evitar renders intermedios
+                                setBarbershopId(userProfile.barbershopId);
+                                setUser(currentUser);
+                                FirebaseService.setScope(userProfile.barbershopId);
+                                await loadData();
+                                setAuthLoading(false);
+                                console.log("✅ Login completo - Redirigiendo a Dashboard");
+                            } else {
+                                console.log("⚠️ Perfil sin barbershopId:");
+                                console.log("   - Email:", currentUser.email);
+                                console.log("   - UID:", currentUser.uid);
+                                console.log("   - Perfil:", userProfile);
+                                console.log("➡️ Mostrando pantalla de configuración");
+                                
+                                // Usuario nuevo sin barbería - mostrar setup
+                                setUser(currentUser);
                                 setBarbershopId(null);
+                                setAuthLoading(false);
                             }
-                        } else {
-                            console.log("❌ No hay usuario");
-                            setUser(null);
-                            setClients([]);
-                            setActivities([]);
+                        } catch (e) {
+                            console.error("❌ Error cargando perfil:", e);
+                            console.error("   Stack:", e.stack);
+                            setUser(currentUser);
                             setBarbershopId(null);
-                            localStorage.removeItem('auth_just_logged_in');
+                            setAuthLoading(false);
                         }
+                    } else {
+                        console.log("❌ No user logged in");
+                        setUser(null);
+                        setClients([]);
+                        setActivities([]);
+                        setBarbershopId(null);
                         setAuthLoading(false);
-                    });
-                    return () => unsubscribe();
-                } else {
-                    setAuthLoading(false);
-                }
+                    }
+                });
+
+                return () => unsubscribe();
             }, []);
 
             const handleSetupComplete = (newId) => {
@@ -653,15 +695,26 @@
                         prompt: 'select_account'
                     });
                     
-                    // Usar redirect para PWAs (más confiable en apps instaladas)
-                    await auth.signInWithRedirect(provider);
-                    // No quitamos el loading aquí porque la página se recargará
-                } catch (error) {
-                    console.error('❌ Error de login:', error);
-                    setLoginLoading(false);
-                    if (error.code !== 'auth/popup-closed-by-user') {
-                        showToast('Error al iniciar sesión: ' + error.message, 'error');
+                    // Intentar popup primero (mejor para PWAs)
+                    try {
+                        console.log("📱 Intentando login con popup...");
+                        const result = await auth.signInWithPopup(provider);
+                        console.log("✅ Login exitoso con popup:", result.user.email);
+                        setLoginLoading(false);
+                    } catch (popupError) {
+                        // Si popup falla (bloqueado), usar redirect
+                        if (popupError.code === 'auth/popup-blocked' || popupError.code === 'auth/popup-closed-by-user') {
+                            console.log("⚠️ Popup bloqueado, usando redirect...");
+                            await auth.signInWithRedirect(provider);
+                            // No quitamos loading porque la página se recargará
+                        } else {
+                            throw popupError;
+                        }
                     }
+                } catch (error) {
+                    console.error('❌ Error de login:', error.code, error.message);
+                    setLoginLoading(false);
+                    showToast('Error al iniciar sesión: ' + error.message, 'error');
                 }
             };
             
@@ -855,12 +908,12 @@
             }
 
             // Not Logged In -> Show Login Screen
-            if (!user && useFirebase) {
+            if (!user) {
                 return <Login onLogin={handleGoogleLogin} loading={loginLoading} />;
             }
             
             // Logged In BUT No Business Set -> Show Setup Screen
-            if (user && !barbershopId && useFirebase) {
+            if (!barbershopId) {
                 return <SetupBusiness user={user} onSetupComplete={handleSetupComplete} />;
             }
 
@@ -1022,54 +1075,54 @@
             }
             
             return (
-                <div class="relative flex h-full min-h-screen w-full flex-col overflow-x-hidden pb-20 bg-[#1C1E21]">
+                <div className="relative flex h-full min-h-screen w-full flex-col overflow-x-hidden pb-20 bg-[#1C1E21]">
                     {/* Header */}
-                    <div class="sticky top-0 z-50 flex items-center justify-between px-4 py-4 bg-[#1C1E21]/95 backdrop-blur-md border-b border-white/5">
-                        <div class="flex items-center gap-3">
+                    <div className="sticky top-0 z-50 flex items-center justify-between px-4 py-4 bg-[#1C1E21]/95 backdrop-blur-md border-b border-white/5">
+                        <div className="flex items-center gap-3">
                             <img src="./Images/hor-barber-logo.png" alt="HOR. Barber" className="h-12 scale-125" />
                         </div>
-                        <button class="relative flex items-center justify-center w-10 h-10 rounded-full bg-[#2A2D31] hover:bg-[#35383D] transition-colors">
-                            <span class="material-symbols-outlined text-[#FA383E]" style={{fontSize: '24px'}}>notifications</span>
-                            <span class="absolute top-2 right-2 w-2 h-2 rounded-full bg-[#FA383E] ring-2 ring-[#1C1E21]"></span>
+                        <button className="relative flex items-center justify-center w-10 h-10 rounded-full bg-[#2A2D31] hover:bg-[#35383D] transition-colors">
+                            <span className="material-symbols-outlined text-[#FA383E]" style={{fontSize: '24px'}}>notifications</span>
+                            <span className="absolute top-2 right-2 w-2 h-2 rounded-full bg-[#FA383E] ring-2 ring-[#1C1E21]"></span>
                         </button>
                     </div>
                     
                     {/* Daily Overview */}
-                    <div class="px-4 py-6">
-                        <h3 class="text-lg font-bold text-white mb-4">Daily Overview</h3>
-                        <div class="grid grid-cols-2 gap-4">
-                            <div class="flex flex-col p-5 bg-[#2A2D31] rounded-xl shadow-sm border border-white/5">
-                                <div class="flex items-center justify-between mb-4">
-                                    <div class="p-2 rounded-lg bg-[#FA383E]/10">
-                                        <span class="material-symbols-outlined text-[#FA383E]">content_cut</span>
+                    <div className="px-4 py-6">
+                        <h3 className="text-lg font-bold text-white mb-4">Daily Overview</h3>
+                        <div className="grid grid-cols-2 gap-4">
+                            <div className="flex flex-col p-5 bg-[#2A2D31] rounded-xl shadow-sm border border-white/5">
+                                <div className="flex items-center justify-between mb-4">
+                                    <div className="p-2 rounded-lg bg-[#FA383E]/10">
+                                        <span className="material-symbols-outlined text-[#FA383E]">content_cut</span>
                                     </div>
-                                    <span class={`text-xs font-semibold px-2 py-0.5 rounded-full ${visitsTrendClass}`}>{visitsChangeLabel}</span>
+                                    <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${visitsTrendClass}`}>{visitsChangeLabel}</span>
                                 </div>
-                                <p class="text-sm font-medium text-slate-400">Today's Visits</p>
-                                <p class="text-3xl font-extrabold text-white mt-1">{todayVisits}</p>
+                                <p className="text-sm font-medium text-slate-400">Today's Visits</p>
+                                <p className="text-3xl font-extrabold text-white mt-1">{todayVisits}</p>
                             </div>
                             
-                            <div class="flex flex-col p-5 bg-[#2A2D31] rounded-xl shadow-sm border border-white/5">
-                                <div class="flex items-center justify-between mb-4">
-                                    <div class="p-2 rounded-lg bg-[#FA383E]/10">
-                                        <span class="material-symbols-outlined text-[#FA383E]">person_add</span>
+                            <div className="flex flex-col p-5 bg-[#2A2D31] rounded-xl shadow-sm border border-white/5">
+                                <div className="flex items-center justify-between mb-4">
+                                    <div className="p-2 rounded-lg bg-[#FA383E]/10">
+                                        <span className="material-symbols-outlined text-[#FA383E]">person_add</span>
                                     </div>
-                                    <span class={`text-xs font-semibold px-2 py-0.5 rounded-full ${clientsTrendClass}`}>{clientsChangeLabel}</span>
+                                    <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${clientsTrendClass}`}>{clientsChangeLabel}</span>
                                 </div>
-                                <p class="text-sm font-medium text-slate-400">New Clients</p>
-                                <p class="text-3xl font-extrabold text-white mt-1">{newClientsToday}</p>
+                                <p className="text-sm font-medium text-slate-400">New Clients</p>
+                                <p className="text-3xl font-extrabold text-white mt-1">{newClientsToday}</p>
                             </div>
                         </div>
                     </div>
                     
                     {/* Recent Activity */}
-                    <div class="flex-1 px-4">
-                        <div class="flex items-center justify-between mb-4">
-                            <h3 class="text-lg font-bold text-white">Recent Activity</h3>
-                            <a onClick={() => navigate('recent-activity')} class="text-sm font-medium text-[#FA383E] hover:text-[#F35369] cursor-pointer">View All</a>
+                    <div className="flex-1 px-4">
+                        <div className="flex items-center justify-between mb-4">
+                            <h3 className="text-lg font-bold text-white">Recent Activity</h3>
+                            <a onClick={() => navigate('recent-activity')} className="text-sm font-medium text-[#FA383E] hover:text-[#F35369] cursor-pointer">View All</a>
                         </div>
                         
-                        <div class="flex flex-col gap-3">
+                        <div className="flex flex-col gap-3">
                             {recentActivities.length > 0 ? (
                                 recentActivities.map(activity => {
                                     // Try to find client, but don't fail if deleted
@@ -1087,29 +1140,29 @@
                                         <div 
                                             key={activity.id} 
                                             onClick={() => client && navigate('client-profile', client)} 
-                                            class={`flex items-center gap-4 p-3 bg-[#2A2D31] rounded-xl border border-white/5 hover:border-[#FA383E]/50 transition-colors ${client ? 'cursor-pointer' : 'cursor-default opacity-80'}`}
+                                            className={`flex items-center gap-4 p-3 bg-[#2A2D31] rounded-xl border border-white/5 hover:border-[#FA383E]/50 transition-colors ${client ? 'cursor-pointer' : 'cursor-default opacity-80'}`}
                                         >
-                                            <div class="relative shrink-0">
+                                            <div className="relative shrink-0">
                                                 {client && client.image ? (
-                                                    <div class="h-12 w-12 rounded-full bg-cover bg-center" style={{backgroundImage: `url("${client.image}")`}}></div>
+                                                    <div className="h-12 w-12 rounded-full bg-cover bg-center" style={{backgroundImage: `url("${client.image}")`}}></div>
                                                 ) : (
-                                                    <div class="h-12 w-12 rounded-full bg-[#2A2D31] border-2 border-[#FA383E] flex items-center justify-center text-[#FA383E] font-bold text-lg">
+                                                    <div className="h-12 w-12 rounded-full bg-[#2A2D31] border-2 border-[#FA383E] flex items-center justify-center text-[#FA383E] font-bold text-lg">
                                                         {clientName.charAt(0).toUpperCase()}
                                                     </div>
                                                 )}
                                                 {/* Only show badge if client still exists */}
                                                 {client && level && (
-                                                    <div class="absolute -bottom-1 -right-1 rounded-full p-0.5 border-2 border-[#1C1E21]" style={{backgroundColor: level.bgColor}} title={`${level.name} Member`}>
-                                                        <span class="material-symbols-outlined text-white" style={{fontSize: '14px'}}>{level.icon}</span>
+                                                    <div className="absolute -bottom-1 -right-1 rounded-full p-0.5 border-2 border-[#1C1E21]" style={{backgroundColor: level.bgColor}} title={`${level.name} Member`}>
+                                                        <span className="material-symbols-outlined text-white" style={{fontSize: '14px'}}>{level.icon}</span>
                                                     </div>
                                                 )}
                                             </div>
-                                            <div class="flex flex-col flex-1 min-w-0">
-                                                <div class="flex justify-between items-start">
-                                                    <p class="text-base font-bold text-white truncate">{clientName}</p>
-                                                    <span class="text-xs font-medium text-slate-500">{timeStr}</span>
+                                            <div className="flex flex-col flex-1 min-w-0">
+                                                <div className="flex justify-between items-start">
+                                                    <p className="text-base font-bold text-white truncate">{clientName}</p>
+                                                    <span className="text-xs font-medium text-slate-500">{timeStr}</span>
                                                 </div>
-                                                <p class="text-sm text-slate-400 truncate">
+                                                <p className="text-sm text-slate-400 truncate">
                                                     {activity.service} - {activity.barber} {!client && '(Deleted)'}
                                                 </p>
                                             </div>
@@ -1117,32 +1170,32 @@
                                     );
                                 })
                             ) : (
-                                <div class="text-center py-8">
-                                    <span class="material-symbols-outlined text-slate-600 text-4xl mb-2 block">content_cut</span>
-                                    <p class="text-slate-500 text-sm">No recent activity</p>
+                                <div className="text-center py-8">
+                                    <span className="material-symbols-outlined text-slate-600 text-4xl mb-2 block">content_cut</span>
+                                    <p className="text-slate-500 text-sm">No recent activity</p>
                                 </div>
                             )}
                         </div>
                     </div>
                     
                     {/* Bottom Navigation */}
-                    <div class="fixed bottom-0 left-0 right-0 z-50 bg-[#1C1E21] border-t border-white/5 pb-safe">
-                        <div class="flex items-center justify-around h-16">
-                            <button onClick={() => navigate('dashboard')} class="flex flex-col items-center justify-center gap-1 p-2 text-[#FA383E]">
-                                <span class="material-symbols-outlined filled">dashboard</span>
-                                <span class="text-[10px] font-medium">Home</span>
+                    <div className="fixed bottom-0 left-0 right-0 z-50 bg-[#1C1E21] border-t border-white/5 pb-safe">
+                        <div className="flex items-center justify-around h-16">
+                            <button onClick={() => navigate('dashboard')} className="flex flex-col items-center justify-center gap-1 p-2 text-[#FA383E]">
+                                <span className="material-symbols-outlined filled">dashboard</span>
+                                <span className="text-[10px] font-medium">Home</span>
                             </button>
-                            <button onClick={() => navigate('clients-list')} class="flex flex-col items-center justify-center gap-1 p-2 text-slate-400 hover:text-slate-300">
-                                <span class="material-symbols-outlined">people</span>
-                                <span class="text-[10px] font-medium">Clients</span>
+                            <button onClick={() => navigate('clients-list')} className="flex flex-col items-center justify-center gap-1 p-2 text-slate-400 hover:text-slate-300">
+                                <span className="material-symbols-outlined">people</span>
+                                <span className="text-[10px] font-medium">Clients</span>
                             </button>
-                            <button onClick={() => navigate('analytics')} class="flex flex-col items-center justify-center gap-1 p-2 text-slate-400 hover:text-slate-300">
-                                <span class="material-symbols-outlined">bar_chart</span>
-                                <span class="text-[10px] font-medium">Analytics</span>
+                            <button onClick={() => navigate('analytics')} className="flex flex-col items-center justify-center gap-1 p-2 text-slate-400 hover:text-slate-300">
+                                <span className="material-symbols-outlined">bar_chart</span>
+                                <span className="text-[10px] font-medium">Analytics</span>
                             </button>
-                            <button onClick={() => navigate('settings')} class="flex flex-col items-center justify-center gap-1 p-2 text-slate-400 hover:text-slate-300">
-                                <span class="material-symbols-outlined">settings</span>
-                                <span class="text-[10px] font-medium">Settings</span>
+                            <button onClick={() => navigate('settings')} className="flex flex-col items-center justify-center gap-1 p-2 text-slate-400 hover:text-slate-300">
+                                <span className="material-symbols-outlined">settings</span>
+                                <span className="text-[10px] font-medium">Settings</span>
                             </button>
                         </div>
                     </div>
