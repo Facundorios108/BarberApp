@@ -6,14 +6,19 @@
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="HOR Barber">
-    <title>BarberLoyalty App</title>
+    <meta name="theme-color" content="#FA383E">
+    <title>HOR Barber App</title>
 
     <!-- PWA Manifest -->
-    <link rel="manifest" href="manifest.json">
+    <link rel="manifest" href="/manifest.json">
 
     <!-- App Icons -->
-    <link rel="icon" type="image/png" href="Images/hor-barber-logo.png">
-    <link rel="apple-touch-icon" href="Images/hor-barber-logo.png">
+    <link rel="icon" type="image/png" sizes="32x32" href="/Images/hor-barber-logo.png">
+    <link rel="icon" type="image/png" sizes="16x16" href="/Images/hor-barber-logo.png">
+    <link rel="apple-touch-icon" sizes="180x180" href="/Images/hor-barber-logo.png">
+    <link rel="apple-touch-icon" sizes="152x152" href="/Images/hor-barber-logo.png">
+    <link rel="apple-touch-icon" sizes="120x120" href="/Images/hor-barber-logo.png">
+    <link rel="apple-touch-icon" href="/Images/hor-barber-logo.png">
     
     <!-- Fonts -->
     <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
@@ -565,28 +570,39 @@
             const [clients, setClients] = useState([]);
             const [activities, setActivities] = useState([]);
 
-            // Handle Auth State
+            // Handle Auth State & Redirect Result
             React.useEffect(() => {
                 if (useFirebase && auth) {
+                    auth.getRedirectResult().then((result) => {
+                        if (result.user) {
+                            console.log("Redirect login successful"); 
+                        }
+                    }).catch((error) => {
+                        console.error("Redirect auth error:", error);
+                        // Ignorar unauthorized-domain si estamos en localhost, ya que onAuthStateChanged lo manejará
+                        if (error.code !== 'auth/unauthorized-domain') {
+                             showToast('Login error: ' + error.message, 'error');
+                        }
+                    });
+
                     const unsubscribe = auth.onAuthStateChanged(async (currentUser) => {
-                        setUser(currentUser);
-                        
-                        if (currentUser) {
-                            // Check if user belongs to a barbershop
-                            try {
+                        // Evitar estado 'infinito' si authLoading ya terminó
+                        if(currentUser) {
+                             setUser(currentUser);
+                             try {
                                 const userProfile = await FirebaseService.getUserProfile(currentUser.uid);
                                 if (userProfile && userProfile.barbershopId) {
                                     setBarbershopId(userProfile.barbershopId);
                                     FirebaseService.setScope(userProfile.barbershopId);
                                     loadData();
                                 } else {
-                                    // User needs to create/join a business
                                     setBarbershopId(null); 
                                 }
                             } catch (e) {
                                 console.error("Error fetching user profile", e);
                             }
                         } else {
+                            setUser(null);
                             setClients([]);
                             setActivities([]);
                             setBarbershopId(null);
@@ -595,12 +611,8 @@
                     });
                     return () => unsubscribe();
                 } else {
-                    // Fallback for no Firebase
-                    // For demo purposes, we set a default 'demo' scope
-                    FirebaseService.setScope('demo-shop');
-                    setBarbershopId('demo-shop');
+                    // Fallback locked out - must use Firebase
                     setAuthLoading(false);
-                    loadData(); 
                 }
             }, []);
 
@@ -617,14 +629,28 @@
                 setLoginLoading(true);
                 try {
                     const provider = new firebase.auth.GoogleAuthProvider();
+                    // Volver a Popup que es más estable en desarrollo local
                     await auth.signInWithPopup(provider);
-                    // Standard Firebase Auth flow handles the rest via onAuthStateChanged
                 } catch (error) {
                     console.error('Login error:', error);
                     showToast('Login failed: ' + error.message, 'warning');
                 } finally {
                     setLoginLoading(false);
                 }
+            };
+            
+            const handleDemoLogin = () => {
+                const demoUser = {
+                    uid: 'demo-user-123',
+                    displayName: 'Demo Master',
+                    email: 'demo@horbarber.com',
+                    photoURL: './Images/hor-barber-logo.png'
+                };
+                setUser(demoUser);
+                setBarbershopId('local-demo-shop');
+                FirebaseService.setScope('local-demo-shop');
+                // Ensure local storage has data for demo
+                loadData();
             };
 
             const handleLogout = async () => {
