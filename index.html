@@ -573,45 +573,62 @@
             // Handle Auth State & Redirect Result
             React.useEffect(() => {
                 if (useFirebase && auth) {
-                    auth.getRedirectResult().then((result) => {
-                        if (result.user) {
-                            console.log("Redirect login successful"); 
+                    let isProcessing = false;
+                    
+                    // Check for redirect result first
+                    auth.getRedirectResult().then(async (result) => {
+                        if (result.user && !isProcessing) {
+                            isProcessing = true;
+                            console.log("✅ Login exitoso via redirect");
+                            // Marcar que el usuario se acaba de loguear
+                            localStorage.setItem('auth_just_logged_in', 'true');
                         }
                     }).catch((error) => {
-                        console.error("Redirect auth error:", error);
-                        // Ignorar unauthorized-domain si estamos en localhost, ya que onAuthStateChanged lo manejará
-                        if (error.code !== 'auth/unauthorized-domain') {
-                             showToast('Login error: ' + error.message, 'error');
+                        console.error("Redirect error:", error);
+                        if (error.code !== 'auth/popup-closed-by-user') {
+                            showToast('Error: ' + error.message, 'error');
                         }
                     });
 
                     const unsubscribe = auth.onAuthStateChanged(async (currentUser) => {
-                        // Evitar estado 'infinito' si authLoading ya terminó
+                        if (isProcessing) return; // Evitar procesamiento duplicado
+                        
                         if(currentUser) {
-                             setUser(currentUser);
-                             try {
+                            console.log("👤 Usuario detectado:", currentUser.email);
+                            setUser(currentUser);
+                            
+                            // Check if we just logged in
+                            const justLoggedIn = localStorage.getItem('auth_just_logged_in');
+                            
+                            try {
                                 const userProfile = await FirebaseService.getUserProfile(currentUser.uid);
                                 if (userProfile && userProfile.barbershopId) {
+                                    console.log("🏪 Barbershop encontrado:", userProfile.barbershopId);
                                     setBarbershopId(userProfile.barbershopId);
                                     FirebaseService.setScope(userProfile.barbershopId);
-                                    loadData();
+                                    localStorage.removeItem('auth_just_logged_in');
+                                    await loadData();
                                 } else {
-                                    setBarbershopId(null); 
+                                    console.log("⚠️ Usuario sin barbershop, mostrar setup");
+                                    setBarbershopId(null);
+                                    localStorage.removeItem('auth_just_logged_in');
                                 }
                             } catch (e) {
-                                console.error("Error fetching user profile", e);
+                                console.error("Error cargando perfil:", e);
+                                setBarbershopId(null);
                             }
                         } else {
+                            console.log("❌ No hay usuario");
                             setUser(null);
                             setClients([]);
                             setActivities([]);
                             setBarbershopId(null);
+                            localStorage.removeItem('auth_just_logged_in');
                         }
                         setAuthLoading(false);
                     });
                     return () => unsubscribe();
                 } else {
-                    // Fallback locked out - must use Firebase
                     setAuthLoading(false);
                 }
             }, []);
@@ -623,19 +640,28 @@
 
             const handleGoogleLogin = async () => {
                 if (!useFirebase || !auth) {
-                    showToast('Firebase authentication not available', 'warning');
+                    showToast('Firebase no disponible', 'warning');
                     return;
                 }
+                
                 setLoginLoading(true);
+                console.log("🔐 Iniciando login con Google...");
+                
                 try {
                     const provider = new firebase.auth.GoogleAuthProvider();
-                    // Volver a Popup que es más estable en desarrollo local
-                    await auth.signInWithPopup(provider);
+                    provider.setCustomParameters({
+                        prompt: 'select_account'
+                    });
+                    
+                    // Usar redirect para PWAs (más confiable en apps instaladas)
+                    await auth.signInWithRedirect(provider);
+                    // No quitamos el loading aquí porque la página se recargará
                 } catch (error) {
-                    console.error('Login error:', error);
-                    showToast('Login failed: ' + error.message, 'warning');
-                } finally {
+                    console.error('❌ Error de login:', error);
                     setLoginLoading(false);
+                    if (error.code !== 'auth/popup-closed-by-user') {
+                        showToast('Error al iniciar sesión: ' + error.message, 'error');
+                    }
                 }
             };
             
